@@ -153,10 +153,10 @@ class GroupAction:
         '''
 
         return self.frechet_functional(x.reshape(-1,1), y)
-    
+
     def dist_matrix(self, X):
         """
-        Takes in dxn data matrix and returns the nxn quotient distance matrix 
+        Takes in dxn data matrix and returns the nxn quotient distance matrix
         Efficiently computes only the upper triangle via np broadcasting on submatrices
         """
         d, n = X.shape
@@ -207,10 +207,10 @@ class GroupAction:
         dataset_rep = GX[gi, :, np.arange(n)].T
 
         return dataset_rep
-    
+
     def kmeans(self, X, k, init = None, solver = 'iterative', max_iters=100, tol=1e-4):
         """
-        Frechet kmeans using Lloyds algorithm 
+        Frechet kmeans using Lloyds algorithm
         X: array of shape (d, n)
         k: number of clusters
         returns: centroids C (d×k), and labels (n,)
@@ -218,7 +218,7 @@ class GroupAction:
         # init centroids by choosing k random points from X
         if init is None:
             C = X[:, np.random.choice(X.shape[1], k, replace=False)]
-        else: 
+        else:
             C = init
 
         for i in range(max_iters):
@@ -246,7 +246,7 @@ class GroupAction:
             C = new_C
 
         return C, labels
-    
+
     def kmeans_sdp(self, X, k, solver = 'iterative'):
         """
         Finds the Frechet kMeans using quotient distance and the kMeans Pei-Wei SDP
@@ -301,16 +301,16 @@ class GroupAction:
         C = np.column_stack(columns)
 
         return C, embed_labels
-    
+
 class CustomFrechet_GroupAction(GroupAction):
     '''
-    Same as GroupAction but requires frechet_solver, a custom function that takes a (dxn) data matrix and returns 
-        the frechet mean relative to the specified group action. Allows for group specific SDP/spectral solvers. 
+    Same as GroupAction but requires frechet_solver, a custom function that takes a (dxn) data matrix and returns
+        the frechet mean relative to the specified group action. Allows for group specific SDP/spectral solvers.
     '''
     def __init__(self, group, dim, frechet_solver, *args, **kwargs):
         super().__init__(group, dim, *args, **kwargs)
         self.custom_solver = frechet_solver
-        
+
 import torch
 
 class GPU_GroupAction(GroupAction):
@@ -319,12 +319,12 @@ class GPU_GroupAction(GroupAction):
     '''
     def __init__(self, group, dim, device, *args, **kwargs):
         super(GPU_GroupAction, self).__init__(group, dim, *args, **kwargs)
-        # device to run tensor computations on 
+        # device to run tensor computations on
         self.device = device or torch.device('cpu')  # fallback if not provided
-        
+
         # Convert the group matrices to torch tensors for GPU compatibility
         self.matrices = torch.stack([torch.tensor(mat, dtype=torch.float32, device=self.device) for mat in self.group(dim, *self.args,**self.kwargs)], dim=0)
-        
+
     def dist_matrix(self, X):
         """
         Takes in a (d, n) data TENSOR and returns an (n, n) quotient distance matrix.
@@ -483,5 +483,5 @@ def GW_SDP(X):
     # The optimal value of Z
     Z_opt = Z.value
     #############
-    
+
     return Z_opt
