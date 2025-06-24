@@ -56,7 +56,7 @@ X_test_orbits = G.get_orbits(X_test)
 D_test = G.dist_matrix(X_test)
 
 batch_size = 20 # 20 works well for pmId d=3
-n_trials = 1 #The number of times we will train a new model from scratch
+n_trials = 10 #The number of times we will train a new model from scratch
 n_epochs = 100 #The number of training epochs for each model
 grad_steps_per_epoch = 200 #The number of gradient descent iterations in each training epoch
 lr = 1e-2 # learning rate default is 1e-3

@@ -58,7 +58,7 @@ t = 3*d//k  + 1
 # currently maintain dimensionality given by max filtering
 
 batch_size = 20 # 20 works well for pmId d=3
-n_trials = 1 #The number of times we will train a new model from scratch
+n_trials = 10 #The number of times we will train a new model from scratch
 n_epochs = 100 #The number of training epochs for each model
 grad_steps_per_epoch = 200 #The number of gradient descent iterations in each training epoch
 lr = 1e-2 # learning rate default is 1e-3
@@ -136,7 +136,7 @@ for distortion_function in all_test_distortions:
 textstr = '\n'.join([
     str(G).split(',')[0],
     f'Input Data Dimension: {d}',
-    f'Embedding Dimension: {t}',
+    f'Embedding Dimension: {t*k + 1}',
     f'Final Mean Squared Distortion: {avg_final_error:.2f}',
     f'Batch size: {batch_size}',
     f'Grad steps/epoch: {grad_steps_per_epoch}',
@@ -155,4 +155,4 @@ plt.ylabel("Squared Distortion")
 # Get current time formatted as YYYY-MM-DD_HH-MM
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
 # time-based label for now since all params are shown in the figure
-plt.savefig(f'./Results/MF_{timestamp}.png')
+plt.savefig(f'./Results/SORT_{timestamp}.png')

@@ -53,7 +53,7 @@ G = GPU_GroupAction(pmId, d, device=device)
 X_test_orbits = G.get_orbits(X_test)
 D_test = G.dist_matrix(X_test)
 
-n_trials = 100
+n_trials = 1000
 ######################################################## TESTING
 
 all_test_distortions = []
