@@ -16,11 +16,11 @@ X_test_orbits = G.get_orbits(X_test)
 D_test = G.dist_matrix(X_test)
 
 batch_size = 20 # 20 works well for pmId d=3
-n_trials = 10 #The number of times we will train a new model from scratch
-n_epochs = 100 #The number of training epochs for each model
+n_trials = 1 #The number of times we will train a new model from scratch
+n_epochs = 30 #The number of training epochs for each model
 grad_steps_per_epoch = 200 #The number of gradient descent iterations in each training epoch
 lr = 1e-2 # learning rate default is 1e-3
-lr_period =  n_epochs//5
+lr_period =  n_epochs
 ######################################################## TRAINING
 
 all_test_distortions = []
@@ -33,11 +33,11 @@ for trial in range(n_trials):
     train_distortions = []
 
     # max filter template layer
-    templates = torch.normal(0, 1, (t, d), requires_grad=True, device=device)
+    templates = torch.normal(0, 1, (t, d), device=device)
     # linear layer
     L = torch.normal(0, 1, (target_dim, t), requires_grad=True, device=device)
 
-    optimizer = torch.optim.Adam([L, templates], lr)
+    optimizer = torch.optim.Adam([L], lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, lr_period)
 
     for epoch in range(n_epochs):
