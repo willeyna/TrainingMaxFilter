@@ -7,17 +7,17 @@ X_test_np = np.load('X_test.npy')
 X_test = torch.from_numpy(X_test_np).float().to(device)
 # number of templates in max filter
 d = X_test.shape[0]
+t = 3*d
+# currently maintain dimensionality given by max filtering
+target_dim = t
 
-G = GPU_GroupAction(cyclic_translations, d, device=device)
+G = GPU_GroupAction(pmId, d, device=device)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 D_test = G.dist_matrix(X_test)
-# in SORT embedding dim will be t*k, +1 to ensure at least as many params as MF
-t = 3*d//k  + 1
-# currently maintain dimensionality given by max filtering
 
 batch_size = 20 # Number of randomly generated samples per minibatch
-n_trials = 5 #The number of times we will train a new model from scratch
+n_trials = 10 #The number of times we will train a new model from scratch
 n_epochs = 100 #The number of training epochs for each model
 grad_steps_per_epoch = 200 #The number of gradient descent iterations in each training epoch
 lr = 1e-2 # learning rate (default is 1e-3 for ADAM)
@@ -27,15 +27,18 @@ lr_period = n_epochs//5 # period for cosine annealing
 all_test_distortions = []
 all_trained_distortions = []
 all_trained_templates = []
+all_trained_Ls = []
 
 for trial in range(n_trials):
     test_distortions = []
     train_distortions = []
 
     # max filter template layer
-    templates = torch.normal(0, 1, (t, d), requires_grad=True, device=device)
+    templates = torch.normal(0, 1, (t, d), device=device)
+    # linear layer
+    L = torch.normal(0, 1, (target_dim, t), requires_grad=True, device=device)
 
-    optimizer = torch.optim.Adam([templates], lr)
+    optimizer = torch.optim.Adam([L], lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, lr_period)
 
     for epoch in range(n_epochs):
@@ -49,8 +52,8 @@ for trial in range(n_trials):
 
             # Forward pass
             norm_templates = F.normalize(templates, dim=1)
-            filter_features = sorted_filter(norm_templates, X_orbits)
-            features = filter_features
+            filter_features = max_filter(norm_templates, X_orbits)
+            features = L @ filter_features
 
             alpha_sq, beta_sq = squared_lipschitz(D, features, k)
             loss = beta_sq / alpha_sq
@@ -63,12 +66,14 @@ for trial in range(n_trials):
         with torch.no_grad():
             # Compute training distortion on last batch of training data (X, D, etc.)
             norm_templates = F.normalize(templates, dim=1)
-            train_features = sorted_filter(norm_templates, X_orbits)
+            train_features = max_filter(norm_templates, X_orbits)
+            train_features = L @ train_features
             alpha_train_sq, beta_train_sq = squared_lipschitz(D, train_features, k)
             distortion_train = (beta_train_sq / alpha_train_sq).item()
 
             # Compute test distortion
-            test_features = sorted_filter(norm_templates, X_test_orbits)
+            test_features = max_filter(norm_templates, X_test_orbits)
+            test_features = L @ test_features
             alpha_test_sq, beta_test_sq = squared_lipschitz(D_test, test_features, k)
             distortion_test = (beta_test_sq / alpha_test_sq).item()
 
@@ -79,6 +84,7 @@ for trial in range(n_trials):
     all_trained_distortions.append(train_distortions)
     all_test_distortions.append(test_distortions)
     all_trained_templates.append(norm_templates.detach().cpu().numpy())
+    all_trained_Ls.append(L.detach().cpu().numpy())
 
 avg_final_error = np.mean([d[-1] for d in all_test_distortions])
 
@@ -95,7 +101,7 @@ for distortion_function in all_test_distortions:
 textstr = '\n'.join([
     str(G).split(',')[0],
     f'Input Data Dimension: {d}',
-    f'Embedding Dimension: {t*k + 1}',
+    f'Embedding Dimension: {target_dim}',
     f'Final Mean Squared Distortion: {avg_final_error:.2f}',
     f'Batch size: {batch_size}',
     f'Grad steps/epoch: {grad_steps_per_epoch}',
@@ -107,11 +113,11 @@ plt.gca().text(0.98, 0.98, textstr, transform=plt.gca().transAxes, fontsize=10,
                verticalalignment='top', horizontalalignment='right', bbox=props)
 
 
-plt.title("Trained Sort(L(X)) Model Test Error")
+plt.title("Trained Linear(Random Max Filter(X)) Model Test Error")
 plt.xlabel("Epoch")
 plt.ylabel("Squared Distortion")
 
 # Get current time formatted as YYYY-MM-DD_HH-MM
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
 # time-based label for now since all params are shown in the figure
-plt.savefig(f'./Results/SORT_{timestamp}.png')
+plt.savefig(f'./Results/LRMF_{timestamp}.png')

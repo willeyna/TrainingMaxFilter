@@ -2,17 +2,10 @@ import numpy as np
 # used in kmeans SDP
 from sklearn.cluster import KMeans
 import cvxpy as cp
+#
 from itertools import product
-from itertools import permutations
 # unsure if this is good practice but it gets the job done
 import inspect
-
-# needed only for network training scripts
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import torch
-import torch.nn.functional as F
-from datetime import datetime
 
 class GroupAction:
     '''
@@ -160,10 +153,10 @@ class GroupAction:
         '''
 
         return self.frechet_functional(x.reshape(-1,1), y)
-
+    
     def dist_matrix(self, X):
         """
-        Takes in dxn data matrix and returns the nxn quotient distance matrix
+        Takes in dxn data matrix and returns the nxn quotient distance matrix 
         Efficiently computes only the upper triangle via np broadcasting on submatrices
         """
         d, n = X.shape
@@ -214,10 +207,10 @@ class GroupAction:
         dataset_rep = GX[gi, :, np.arange(n)].T
 
         return dataset_rep
-
+    
     def kmeans(self, X, k, init = None, solver = 'iterative', max_iters=100, tol=1e-4):
         """
-        Frechet kmeans using Lloyds algorithm
+        Frechet kmeans using Lloyds algorithm 
         X: array of shape (d, n)
         k: number of clusters
         returns: centroids C (d×k), and labels (n,)
@@ -225,7 +218,7 @@ class GroupAction:
         # init centroids by choosing k random points from X
         if init is None:
             C = X[:, np.random.choice(X.shape[1], k, replace=False)]
-        else:
+        else: 
             C = init
 
         for i in range(max_iters):
@@ -253,7 +246,7 @@ class GroupAction:
             C = new_C
 
         return C, labels
-
+    
     def kmeans_sdp(self, X, k, solver = 'iterative'):
         """
         Finds the Frechet kMeans using quotient distance and the kMeans Pei-Wei SDP
@@ -308,16 +301,16 @@ class GroupAction:
         C = np.column_stack(columns)
 
         return C, embed_labels
-
+    
 class CustomFrechet_GroupAction(GroupAction):
     '''
-    Same as GroupAction but requires frechet_solver, a custom function that takes a (dxn) data matrix and returns
-        the frechet mean relative to the specified group action. Allows for group specific SDP/spectral solvers.
+    Same as GroupAction but requires frechet_solver, a custom function that takes a (dxn) data matrix and returns 
+        the frechet mean relative to the specified group action. Allows for group specific SDP/spectral solvers. 
     '''
     def __init__(self, group, dim, frechet_solver, *args, **kwargs):
         super().__init__(group, dim, *args, **kwargs)
         self.custom_solver = frechet_solver
-
+        
 import torch
 
 class GPU_GroupAction(GroupAction):
@@ -326,12 +319,12 @@ class GPU_GroupAction(GroupAction):
     '''
     def __init__(self, group, dim, device, *args, **kwargs):
         super(GPU_GroupAction, self).__init__(group, dim, *args, **kwargs)
-        # device to run tensor computations on
+        # device to run tensor computations on 
         self.device = device or torch.device('cpu')  # fallback if not provided
-
+        
         # Convert the group matrices to torch tensors for GPU compatibility
         self.matrices = torch.stack([torch.tensor(mat, dtype=torch.float32, device=self.device) for mat in self.group(dim, *self.args,**self.kwargs)], dim=0)
-
+        
     def dist_matrix(self, X):
         """
         Takes in a (d, n) data TENSOR and returns an (n, n) quotient distance matrix.
@@ -353,6 +346,7 @@ class GPU_GroupAction(GroupAction):
         D[idx_lower[0], idx_lower[1]] = D[idx_lower[1], idx_lower[0]]
         return D
 
+
 # ─── Group matrix constructors ────────────────────────────────────────────────
 # functions that generate list of all matrices in a finite group
 
@@ -362,10 +356,6 @@ def cyclic_translations(d):
     '''
     C = np.eye(d)[:, np.append(np.arange(1, d), 0)]
     return [np.linalg.matrix_power(C, j) for j in range(d)]
-
-def permutations(d):
-    I = np.eye(d)
-    return [I[list(perm)] for perm in permutations(range(d))]
 
 def pmId(d):
     '''
@@ -493,63 +483,5 @@ def GW_SDP(X):
     # The optimal value of Z
     Z_opt = Z.value
     #############
-
+    
     return Z_opt
-
-def max_filter(templates, X_orbits):
-    '''
-    X_orbits kxdxn data array
-    templates txd matrix each row is a template
-
-    returns max-filter augmented data (torch tensor)
-    '''
-    inner_products = torch.einsum('td,kdn->ktn', templates, X_orbits)
-    maxes, argmaxes = torch.max(inner_products, axis=0)
-    return maxes
-
-def sorted_filter(templates, X_orbits):
-    """
-    templates: (t, d)
-    X_orbits:  (k, d, n)
-    returns:   (k*d, n)
-    """
-    # inner products → (t, k, n)
-    inner_products = torch.einsum('td,kdn->ktn', templates, X_orbits)
-    sorted_products, _ = torch.sort(inner_products, dim=0)
-
-    return sorted_products.reshape(-1, X_orbits.size(2))
-
-def squared_lipschitz(squared_distance, fX, k, on_orbits = False):
-    """
-    Compute the squared Lipschitz constants (alpha_squared, beta_squared)
-    for a mapping fX given the original squared-distance matrix.
-    """
-    fxT = fX.T
-    # 1) Pairwise squared distances in feature space
-    fx_sq_dist = torch.cdist(fxT, fxT, p=2)**2
-
-    # 2) Select only unique i < j entries (upper triangle mask)
-    if on_orbits:
-        mask = mask_ignore_block_diagonals(squared_distance.shape[0]//k, k)
-    else:
-        mask = torch.triu(torch.ones_like(squared_distance), diagonal=1).bool()
-    orig_sq   = squared_distance[mask]          # (n*(n-1)/2,)
-    mapped_sq = fx_sq_dist[mask]                # (n*(n-1)/2,)
-
-    # 3) Compute expansion factors safely
-    expansions = mapped_sq / orig_sq
-
-    # 4) Return min and max
-    alpha_squared = expansions.min()
-    beta_squared  = expansions.max()
-    return alpha_squared, beta_squared
-
-# chatgpt made-- used for training RELU non-invariant network
-def mask_ignore_block_diagonals(n, k, device=None):
-    nk = n * k
-    idx = torch.arange(nk, device=device)
-    # base mask: False when in same block diagonal (i % n == j % n)
-    base_mask = (idx.unsqueeze(1) % n) != (idx.unsqueeze(0) % n)
-    # additionally mask out the upper diagonal (i < j)
-    upper_diagonal_mask = idx.unsqueeze(1) >= idx.unsqueeze(0)
-    return base_mask & upper_diagonal_mask

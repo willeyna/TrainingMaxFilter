@@ -11,16 +11,17 @@ t = 3*d
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
-G = GPU_GroupAction(cyclic_translations, d, device=device)
+G = GPU_GroupAction(pmId, d, device=device)
+k = G.order
 X_test_orbits = G.get_orbits(X_test)
 D_test = G.dist_matrix(X_test)
 
-batch_size = 20 # 20 works well for pmId d=3
-n_trials = 1 #The number of times we will train a new model from scratch
-n_epochs = 30 #The number of training epochs for each model
+batch_size = 20 # Number of randomly generated samples per minibatch
+n_trials = 5 #The number of times we will train a new model from scratch
+n_epochs = 100 #The number of training epochs for each model
 grad_steps_per_epoch = 200 #The number of gradient descent iterations in each training epoch
-lr = 1e-2 # learning rate default is 1e-3
-lr_period =  n_epochs
+lr = 1e-2 # learning rate (default is 1e-3 for ADAM)
+lr_period = n_epochs//5 # period for cosine annealing
 ######################################################## TRAINING
 
 all_test_distortions = []
@@ -54,7 +55,7 @@ for trial in range(n_trials):
             filter_features = max_filter(norm_templates, X_orbits)
             features = L @ filter_features
 
-            alpha_sq, beta_sq = squared_lipschitz(D, features)
+            alpha_sq, beta_sq = squared_lipschitz(D, features, k)
             loss = beta_sq / alpha_sq
 
             loss.backward()
@@ -67,13 +68,13 @@ for trial in range(n_trials):
             norm_templates = F.normalize(templates, dim=1)
             train_features = max_filter(norm_templates, X_orbits)
             train_features = L @ train_features
-            alpha_train_sq, beta_train_sq = squared_lipschitz(D, train_features)
+            alpha_train_sq, beta_train_sq = squared_lipschitz(D, train_features, k)
             distortion_train = (beta_train_sq / alpha_train_sq).item()
 
             # Compute test distortion
             test_features = max_filter(norm_templates, X_test_orbits)
             test_features = L @ test_features
-            alpha_test_sq, beta_test_sq = squared_lipschitz(D_test, test_features)
+            alpha_test_sq, beta_test_sq = squared_lipschitz(D_test, test_features, k)
             distortion_test = (beta_test_sq / alpha_test_sq).item()
 
             train_distortions.append(distortion_train)
