@@ -2,10 +2,16 @@ import numpy as np
 # used in kmeans SDP
 from sklearn.cluster import KMeans
 import cvxpy as cp
-#
 from itertools import product
 # unsure if this is good practice but it gets the job done
 import inspect
+
+# needed only for network training scripts 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import torch
+import torch.nn.functional as F
+from datetime import datetime
 
 class GroupAction:
     '''
@@ -485,3 +491,59 @@ def GW_SDP(X):
     #############
 
     return Z_opt
+
+def max_filter(templates, X_orbits):
+    '''
+    X_orbits kxdxn data array
+    templates txd matrix each row is a template
+
+    returns max-filter augmented data (torch tensor)
+    '''
+    inner_products = torch.einsum('td,kdn->ktn', templates, X_orbits)
+    maxes, argmaxes = torch.max(inner_products, axis=0)
+    return maxes
+
+def sorted_filter(templates, X_orbits):
+    """
+    templates: (t, d)
+    X_orbits:  (k, d, n)
+    returns:   (k*d, n)
+    """
+    # inner products → (t, k, n)
+    inner_products = torch.einsum('td,kdn->ktn', templates, X_orbits)
+    sorted_products, _ = torch.sort(inner_products, dim=0)
+
+    return sorted_products.reshape(-1, X_orbits.size(2))
+
+def squared_lipschitz(squared_distance, fX):
+    """
+    Compute the squared Lipschitz constants (alpha_squared, beta_squared)
+    for a mapping fX given the original squared-distance matrix.
+    """
+    # 1) Pairwise squared distances in feature space
+    fxT = fX.T                                  # (n, target_dim)
+    diff = fxT.unsqueeze(1) - fxT.unsqueeze(0)  # (n, n, target_dim)
+    fx_sq_dist = (diff ** 2).sum(dim=-1)        # (n, n)
+
+    # 2) Select only unique i < j entries (upper triangle mask)
+    mask = torch.triu(torch.ones_like(squared_distance), diagonal=1).bool()
+    orig_sq   = squared_distance[mask]          # (n*(n-1)/2,)
+    mapped_sq = fx_sq_dist[mask]                # (n*(n-1)/2,)
+
+    # 3) Compute expansion factors safely
+    expansions = mapped_sq / orig_sq
+
+    # 4) Return min and max
+    alpha_squared = expansions.min()
+    beta_squared  = expansions.max()
+    return alpha_squared, beta_squared
+
+# chatgpt made-- used for training RELU non-invariant network
+def mask_ignore_block_diagonals(n, k, device=None):
+    nk = n * k
+    idx = torch.arange(nk, device=device)
+    # base mask: False when in same block diagonal (i % n == j % n)
+    base_mask = (idx.unsqueeze(1) % n) != (idx.unsqueeze(0) % n)
+    # additionally mask out the upper diagonal (i < j)
+    upper_diagonal_mask = idx.unsqueeze(1) >= idx.unsqueeze(0)
+    return base_mask & upper_diagonal_mask

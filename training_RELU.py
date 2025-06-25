@@ -1,56 +1,5 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-import torch.nn.functional as F
 from groupy import *
-from mpl_toolkits.mplot3d import Axes3D
-from datetime import datetime
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-def max_filter(templates, X_orbits):
-    '''
-    X_orbits kxdxn data array
-    templates txd matrix each row is a template
-
-    returns max-filter augmented data (torch tensor)
-    '''
-    inner_products = torch.einsum('td,kdn->ktn', templates, X_orbits)
-    maxes, argmaxes = torch.max(inner_products, axis=0)
-    return maxes
-
-# chatgpt made
-def mask_ignore_block_diagonals(n, k, device=None):
-    nk = n * k
-    idx = torch.arange(nk, device=device)
-    # base mask: False when in same block diagonal (i % n == j % n)
-    base_mask = (idx.unsqueeze(1) % n) != (idx.unsqueeze(0) % n)
-    # additionally mask out the upper diagonal (i < j)
-    upper_diagonal_mask = idx.unsqueeze(1) >= idx.unsqueeze(0)
-    return base_mask & upper_diagonal_mask
-
-# ignores distance-0 data points in computing bounds since they kill everything.
-def squared_lipschitz_orbits(squared_distance, fX, k):
-    """
-    Compute the squared Lipschitz constants (alpha_squared, beta_squared)
-    for a mapping fX given the original squared-distance matrix.
-    """
-    # 1) Pairwise squared distances in feature space
-    fxT = fX.T                                  # (n, target_dim)
-    diff = fxT.unsqueeze(1) - fxT.unsqueeze(0)  # (n, n, target_dim)
-    fx_sq_dist = (diff ** 2).sum(dim=-1)        # (n, n)
-
-    # 2) Select only unique i < j entries (upper triangle mask)
-    mask = mask_ignore_block_diagonals(squared_distance.shape[0]//k, k)
-    orig_sq   = squared_distance[mask]          # (n*(n-1)/2,)
-    mapped_sq = fx_sq_dist[mask]                # (n*(n-1)/2,)
-
-    # 3) Compute expansion factors safely
-    expansions = mapped_sq / orig_sq
-
-    # 4) Return min and max
-    alpha_squared = expansions.min()
-    beta_squared  = expansions.max()
-    return alpha_squared, beta_squared
 
 ######################################################## PARAMETERS
 # load test data so that it is the same for every model
@@ -62,7 +11,7 @@ t = 3*d
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
-G = GPU_GroupAction(pmId, d, device=device)
+G = GPU_GroupAction(cyclic_translations, d, device=device)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 D_test = G.dist_matrix(X_test)
