@@ -332,25 +332,37 @@ class GPU_GroupAction(GroupAction):
         # Convert the group matrices to torch tensors for GPU compatibility
         self.matrices = torch.stack([torch.tensor(mat, dtype=torch.float32, device=self.device) for mat in self.group(dim, *self.args,**self.kwargs)], dim=0)
 
-    def dist_matrix(self, X):
+    def dist_matrix(self, X, Y=None):
         """
-        Takes in a (d, n) data TENSOR and returns an (n, n) quotient distance matrix.
-        Efficiently computes only the upper triangle using broadcasting.
+        Returns the quotient‐distance matrix between columns of X (d×n)
+        and columns of Y (d×m).
         """
-        d, n = X.shape
-        GX = self.get_orbits(X)  # (k, d, n), assumed to be torch.Tensor
-        D = torch.zeros((n, n), device=self.device)
+        device = X.device
+        n = X.shape[1]
+        if Y is None:
+            m = n
+        else:
+            m = Y.shape[1]
+        GX = self.get_orbits(X)                # shape (k, d, n)
+        D  = torch.zeros((n, m), device=device)
 
-        for i in range(n):
-            x = X[:, i]  # (d,)
-            # Broadcast subtraction: (k, d, n - i)
-            diff = GX[:, :, i:] - x.view(1, -1, 1)
-            sq_dists = (diff ** 2).sum(dim=1)  # (k, n - i)
-            D[i, i:] = sq_dists.min(dim=0).values
-
-        # Reflect upper triangle to lower triangle
-        idx_lower = torch.tril_indices(n, n, offset=-1, device=X.device)
-        D[idx_lower[0], idx_lower[1]] = D[idx_lower[1], idx_lower[0]]
+        # when only one dataset is given build it symmetrically
+        if Y is None or Y is X:
+            for i in range(n):
+                x = X[:, i]  # shape (d,)
+                # only computes off diagonal distances
+                diff = GX[:, :, i:] - x.view(1, -1, 1)
+                sq_dists = (diff ** 2).sum(dim=1)  # (k, n - i)
+                D[i, i:] = sq_dists.min(dim=0).values
+            idx_lower = torch.tril_indices(n, n, offset=-1, device=X.device)
+            D[idx_lower[0], idx_lower[1]] = D[idx_lower[1], idx_lower[0]]
+        else:
+            for i in range(m):
+                y = Y[:,i]
+                # distances from all g·x_i to every y_j
+                diff = GX - y.view(1, -1, 1)
+                sq_dists = (diff ** 2).sum(dim=1)  # (k, n - i)
+                D[:, i] = sq_dists.min(dim=0).values
         return D
 
 # ─── Group matrix constructors ────────────────────────────────────────────────
@@ -363,7 +375,7 @@ def cyclic_translations(d):
     C = np.eye(d)[:, np.append(np.arange(1, d), 0)]
     return [np.linalg.matrix_power(C, j) for j in range(d)]
 
-def permutations(d):
+def symmetric(d):
     I = np.eye(d)
     return [I[list(perm)] for perm in permutations(range(d))]
 
@@ -519,29 +531,17 @@ def sorted_filter(templates, X_orbits):
 
     return sorted_products.reshape(-1, X_orbits.size(2))
 
-def squared_lipschitz(squared_distance, fX, k, on_orbits = False):
+def squared_lipschitz(DX, DfX):
     """
     Compute the squared Lipschitz constants (alpha_squared, beta_squared)
     for a mapping fX given the original squared-distance matrix.
     """
-    fxT = fX.T
-    # 1) Pairwise squared distances in feature space
-    fx_sq_dist = torch.cdist(fxT, fxT, p=2)**2
-
-    # 2) Select only unique i < j entries (upper triangle mask)
-    if on_orbits:
-        mask = mask_ignore_block_diagonals(squared_distance.shape[0]//k, k)
-    else:
-        mask = torch.triu(torch.ones_like(squared_distance), diagonal=1).bool()
-    orig_sq   = squared_distance[mask]          # (n*(n-1)/2,)
-    mapped_sq = fx_sq_dist[mask]                # (n*(n-1)/2,)
-
-    # 3) Compute expansion factors safely
-    expansions = mapped_sq / orig_sq
-
+    # nan ignores diags and same-orbit points when not inherently G-invariant
+    mask = (DX != 0)
+    expansions = DfX[mask]/DX[mask]
     # 4) Return min and max
-    alpha_squared = expansions.min()
-    beta_squared  = expansions.max()
+    alpha_squared = torch.min(expansions)
+    beta_squared  = torch.max(expansions)
     return alpha_squared, beta_squared
 
 # chatgpt made-- used for training RELU non-invariant network

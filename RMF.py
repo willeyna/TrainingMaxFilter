@@ -6,21 +6,22 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 X_test_np = np.load('X_test.npy')
 X_test = torch.from_numpy(X_test_np).float().to(device)
 # number of templates in max filter
-d = X_test.shape[0]
+d,n = X_test.shape
 t = 3*d
 
 G = GPU_GroupAction(cyclic_translations, d, device=device)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 D_test = G.dist_matrix(X_test)
-
-n_trials = 1000
+block_size = 1000 # how many data points to include in each test distance matrix
+n_trials = 2000
 ######################################################## TESTING
 
 all_test_distortions = []
 all_trained_templates = []
 
 for trial in range(n_trials):
+    print("Trial", trial)
     test_distortions = []
 
     # max filter template layer
@@ -28,10 +29,30 @@ for trial in range(n_trials):
 
     with torch.no_grad():
         norm_templates = F.normalize(templates, dim=1)
+        # Compute test distortion ---
         test_features = max_filter(norm_templates, X_test_orbits)
-        alpha_test_sq, beta_test_sq = squared_lipschitz(D_test, test_features, k)
-        distortion_test = (beta_test_sq / alpha_test_sq).item()
+        # initalize alpha and beta
+        alpha_test_sq = torch.tensor(float("inf"), device=device)
+        beta_test_sq  = torch.tensor(0, device=device)
+        # break test set into blocks over which to compute distance matrices
+        for i in range(0, n, block_size):
+            # choose subset of x_i and f(x_i)
+            Xi = X_test[:, i:i+block_size]
+            fXi = test_features[:, i:i+block_size]
+            for j in range(i, n, block_size):
+                Xj = X_test[:, j:j+block_size]
+                fXj = test_features[:, j:j+block_size]
+                # compute block distance matrices
+                # when Xi=Xj function automatically only computes n choose 2 distances
+                DX_ij   = G.dist_matrix(Xi, Xj)
+                DfX_ij  = torch.cdist(fXi.T, fXj.T)**2
+                # compute constants over that block
+                alpha_ij, beta_ij = squared_lipschitz(DX_ij, DfX_ij)
+                # update either lipschitz constant if a worse one is found
+                alpha_test_sq = torch.minimum(alpha_test_sq, alpha_ij)
+                beta_test_sq = torch.maximum(beta_test_sq, beta_ij)
 
+        distortion_test = (beta_test_sq / alpha_test_sq).item()
         test_distortions.append(distortion_test)
 
     all_test_distortions.append(test_distortions)
