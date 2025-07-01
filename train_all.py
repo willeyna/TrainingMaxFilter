@@ -1,4 +1,4 @@
-import os, subprocess, time
+import subprocess, time
 
 SCRIPTS = [
     "generate_testdata.py",
@@ -19,13 +19,25 @@ def free_vram_mb():
     ])
     return int(out.split()[0])
 
+procs = []
 for script in SCRIPTS:
+    # wait until enough VRAM is free
     while free_vram_mb() < MIN_FREE_MB:
         time.sleep(5)
-    print(f"Running {script}...")
-    result = subprocess.run(["python", script], capture_output=True, text=True)
-    print(f"Output of {script}:\n{result.stdout}")
-    if result.stderr:
-        print(f"Errors in {script}:\n{result.stderr}")
+    print(f"Launching {script}…")
+    p = subprocess.Popen(
+        ["python", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    procs.append((script, p))
 
-print("All scripts completed.")
+# collect and print each script's output
+for script, p in procs:
+    out, err = p.communicate()
+    print(f"\n=== {script} stdout ===\n{out}", end="")
+    if err:
+        print(f"--- {script} stderr ---\n{err}", end="")
+
+print("\nAll scripts completed.")
