@@ -9,12 +9,11 @@ X_test = torch.from_numpy(X_test_np).float().to(device)
 d,n = X_test.shape
 t = 3*d
 
-G = GPU_GroupAction(cyclic_translations, d, device=device)
+G = GPU_GroupAction(pmId, d, device=device)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
-D_test = G.dist_matrix(X_test)
-block_size = 1000 # how many data points to include in each test distance matrix
-n_trials = 2000
+block_size = 10000 # how many data points to include in each test distance matrix
+n_trials = 1000
 ######################################################## TESTING
 
 all_test_distortions = []
