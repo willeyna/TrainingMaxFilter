@@ -544,12 +544,22 @@ def squared_lipschitz(DX, DfX):
     beta_squared  = torch.max(expansions)
     return alpha_squared, beta_squared
 
-# chatgpt made-- used for training RELU non-invariant network
-def mask_ignore_block_diagonals(n, k, device=None):
-    nk = n * k
-    idx = torch.arange(nk, device=device)
-    # base mask: False when in same block diagonal (i % n == j % n)
-    base_mask = (idx.unsqueeze(1) % n) != (idx.unsqueeze(0) % n)
-    # additionally mask out the upper diagonal (i < j)
-    upper_diagonal_mask = idx.unsqueeze(1) >= idx.unsqueeze(0)
-    return base_mask & upper_diagonal_mask
+def invariant_polynomial(X, G, homo=False):
+    device = X.device
+    d,n = X.shape
+    if homo:
+        norms = torch.norm(X, dim=0)
+        Y = X/norms
+    else:
+        norms = torch.ones(n, device = device)
+        Y = X
+
+    if G.name == 'pmId':
+        # Compute outer products: each x_i x_i^T stored in a tensor of shape (n, d, d)
+        outer_products = torch.einsum('in,jn->ijn', Y, Y)  # Shape: (n, d, d)
+        pX = outer_products.reshape(d*d, n)
+        return pX
+
+
+
+    return

@@ -69,7 +69,8 @@ textstr = '\n'.join([
     f'Input Data Dimension: {d}',
     f'Embedding Dimension: {t}',
     f'Mean Squared Distortion: {avg_final_error:.2f}',
-    f'Median Squared Distortion: {median_final_error:.2f}'
+    f'Median Squared Distortion: {median_final_error:.2f}',
+    f'Number of Trials: {n_trials}'
 ])
 # Place text box in upper right in axes coords
 props = dict(boxstyle='round', alpha=0.1)

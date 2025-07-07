@@ -1,6 +1,7 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+torch.manual_seed(2)
+torch.cuda.manual_seed_all(2)
 ######################################################## PARAMETERS
 # load test data so that it is the same for every model
 X_test_np = np.load('X_test.npy')
@@ -9,7 +10,7 @@ X_test = torch.from_numpy(X_test_np).float().to(device)
 d,n = X_test.shape
 t = 3*d
 
-G = GPU_GroupAction(cyclic_translations, d, device=device)
+G = GPU_GroupAction(pmId, d, device=device)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 
@@ -28,6 +29,7 @@ all_trained_templates = []
 all_trained_Ls = []
 
 for trial in range(n_trials):
+    print()
     print("Trial", trial)
     test_distortions = []
     train_distortions = []
@@ -104,10 +106,13 @@ for trial in range(n_trials):
 
 mean_final_error = np.mean([d[-1] for d in all_test_distortions])
 median_final_error = np.median([d[-1] for d in all_test_distortions])
+median_final_train_error = np.median([d[-1] for d in all_trained_distortions])
 
 fig = plt.figure(figsize = (15,5))
 for distortion_function in all_test_distortions:
     plt.plot(distortion_function, alpha=0.3, c='red')
+for distortion_function in all_trained_distortions:
+    plt.plot(distortion_function, alpha=0.1, c='blue')
 
 textstr = '\n'.join([
     str(G).split(',')[0],
@@ -117,7 +122,8 @@ textstr = '\n'.join([
     f'Grad steps/epoch: {grad_steps_per_epoch}',
     f'Learning rate: {lr}',
     f'Mean Final Squared Distortion: {mean_final_error:.2f}',
-    f'Median Final Squared Distortion: {median_final_error:.2f}'
+    f'Median Final Squared Distortion: {median_final_error:.2f}',
+    f'Median Final Training Squared Distortion: {median_final_train_error:.2f}'
 ])
 # Place text box in upper right in axes coords
 props = dict(boxstyle='round', alpha=0.1)

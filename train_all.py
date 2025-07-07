@@ -3,11 +3,11 @@ import subprocess, time
 SCRIPTS = [
     "generate_testdata.py",
     "training_LMF.py",
-    "training_LRMF.py",
+    # "training_LRMF.py",
     "training_MF.py",
-    "training_SORT.py",
-    "training_RELU.py",
-    "RMF.py",
+    # "training_SORT.py",
+    # "training_RELU.py",
+    # "RMF.py",
 ]
 
 MIN_FREE_MB = 1500

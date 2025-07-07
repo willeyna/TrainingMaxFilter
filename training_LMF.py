@@ -1,6 +1,7 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+torch.manual_seed(2)
+torch.cuda.manual_seed_all(2)
 ######################################################## PARAMETERS
 # load test data so that it is the same for every model
 X_test_np = np.load('X_test.npy')
@@ -11,11 +12,11 @@ t = 3*d
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
-G = GPU_GroupAction(cyclic_translations, d, device=device)
+G = GPU_GroupAction(pmId, d, device=device)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 
-batch_size = 20 # Number of randomly generated samples per minibatch
+batch_size = 100 # Number of randomly generated samples per minibatch
 n_trials = 10 # The number of times we will train a new model from scratch
 n_epochs = 100 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
@@ -30,6 +31,7 @@ all_trained_templates = []
 all_trained_Ls = []
 
 for trial in range(n_trials):
+    print()
     print("Trial", trial)
     test_distortions = []
     train_distortions = []
@@ -39,7 +41,7 @@ for trial in range(n_trials):
     # linear layer
     L = torch.normal(0, 1, (target_dim, t), requires_grad=True, device=device)
 
-    optimizer = torch.optim.Adam([L, templates], lr)
+    optimizer = torch.optim.Adam([templates, L], lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, lr_period)
 
     for epoch in range(n_epochs):
@@ -110,10 +112,13 @@ for trial in range(n_trials):
 
 mean_final_error = np.mean([d[-1] for d in all_test_distortions])
 median_final_error = np.median([d[-1] for d in all_test_distortions])
+median_final_train_error = np.median([d[-1] for d in all_trained_distortions])
 
 fig = plt.figure(figsize = (15,5))
 for distortion_function in all_test_distortions:
     plt.plot(distortion_function, alpha=0.3, c='red')
+for distortion_function in all_trained_distortions:
+    plt.plot(distortion_function, alpha=0.1, c='blue')
 
 textstr = '\n'.join([
     str(G).split(',')[0],
@@ -123,7 +128,8 @@ textstr = '\n'.join([
     f'Grad steps/epoch: {grad_steps_per_epoch}',
     f'Learning rate: {lr}',
     f'Mean Final Squared Distortion: {mean_final_error:.2f}',
-    f'Median Final Squared Distortion: {median_final_error:.2f}'
+    f'Median Final Squared Distortion: {median_final_error:.2f}',
+    f'Median Final Training Squared Distortion: {median_final_train_error:.2f}'
 ])
 # Place text box in upper right in axes coords
 props = dict(boxstyle='round', alpha=0.1)
