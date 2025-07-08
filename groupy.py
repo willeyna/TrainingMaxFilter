@@ -334,7 +334,7 @@ class GPU_GroupAction(GroupAction):
 
     def dist_matrix(self, X, Y=None):
         """
-        Returns the quotient‐distance matrix between columns of X (d×n)
+        Returns the squared quotient‐distance matrix between columns of X (d×n)
         and columns of Y (d×m).
         """
         device = X.device
@@ -536,8 +536,9 @@ def squared_lipschitz(DX, DfX):
     Compute the squared Lipschitz constants (alpha_squared, beta_squared)
     for a mapping fX given the original squared-distance matrix.
     """
-    # nan ignores diags and same-orbit points when not inherently G-invariant
-    mask = (DX != 0)
+    # mask ignores diags and same-orbit points when not inherently G-invariant
+    EPSILON = 1e-5
+    mask = (DX > EPSILON)
     expansions = DfX[mask]/DX[mask]
     # 4) Return min and max
     alpha_squared = torch.min(expansions)
@@ -548,7 +549,7 @@ def invariant_polynomial(X, G, homo=False):
     device = X.device
     d,n = X.shape
     if homo:
-        norms = torch.norm(X, dim=0)
+        norms = torch.linalg.vector_norm(X, dim=0)
         Y = X/norms
     else:
         norms = torch.ones(n, device = device)
@@ -558,8 +559,15 @@ def invariant_polynomial(X, G, homo=False):
         # Compute outer products: each x_i x_i^T stored in a tensor of shape (n, d, d)
         outer_products = torch.einsum('in,jn->ijn', Y, Y)  # Shape: (n, d, d)
         pX = outer_products.reshape(d*d, n)
-        return pX
 
+    if G.name == 'symmetric':
+        pX = torch.stack([torch.sum(X**k, axis=0) for k in range(1, d+1)])
 
+    if G.name == 'cyclic_translations':
+        Y = torch.fft.fft(X, dim=0)
+        i = torch.arange(d).view(-1, 1)
+        j = torch.arange(d).view(1, -1)
+        Z = Y[i] * Y[j] * torch.conj(Y[(i - j) % d])
+        pX = torch.vstack((Z.reshape(d * d, -1).real, Z.reshape(d * d, -1).imag))
 
-    return
+    return norms * pX
