@@ -334,7 +334,7 @@ class GPU_GroupAction(GroupAction):
 
     def dist_matrix(self, X, Y=None):
         """
-        Returns the squared quotient‐distance matrix between columns of X (d×n)
+        Returns the NON-SQUARED quotient‐distance matrix between columns of X (d×n)
         and columns of Y (d×m).
         """
         device = X.device
@@ -363,7 +363,7 @@ class GPU_GroupAction(GroupAction):
                 diff = GX - y.view(1, -1, 1)
                 sq_dists = (diff ** 2).sum(dim=1)  # (k, n - i)
                 D[:, i] = sq_dists.min(dim=0).values
-        return D
+        return torch.sqrt(D)
 
 # ─── Group matrix constructors ────────────────────────────────────────────────
 # functions that generate list of all matrices in a finite group
@@ -531,19 +531,20 @@ def sorted_filter(templates, X_orbits):
 
     return sorted_products.reshape(-1, X_orbits.size(2))
 
-def squared_lipschitz(DX, DfX):
+def lipschitz(DX, DfX):
     """
-    Compute the squared Lipschitz constants (alpha_squared, beta_squared)
-    for a mapping fX given the original squared-distance matrix.
+    Compute the Lipschitz constants (alpha_squared, beta_squared)
+    for a mapping fX given the original distance matrix and the map's.
     """
-    # mask ignores diags and same-orbit points when not inherently G-invariant
-    EPSILON = 1e-5
-    mask = (DX > EPSILON)
-    expansions = DfX[mask]/DX[mask]
+    # TOL to add to expansions so that distortion does not blow up
+    EPS = 1e-8
+    # ignore same-orbit points when not inherently G-invariant
+    mask = (DX != 0)
+    expansions = (DfX[mask]+EPS)/(DX[mask]+EPS)
     # 4) Return min and max
-    alpha_squared = torch.min(expansions)
-    beta_squared  = torch.max(expansions)
-    return alpha_squared, beta_squared
+    alpha = torch.min(expansions)
+    beta  = torch.max(expansions)
+    return alpha, beta
 
 def invariant_polynomial(X, G, homo=False):
     device = X.device
@@ -560,14 +561,18 @@ def invariant_polynomial(X, G, homo=False):
         outer_products = torch.einsum('in,jn->ijn', Y, Y)  # Shape: (n, d, d)
         pX = outer_products.reshape(d*d, n)
 
-    if G.name == 'symmetric':
+    elif G.name == 'symmetric':
         pX = torch.stack([torch.sum(X**k, axis=0) for k in range(1, d+1)])
 
-    if G.name == 'cyclic_translations':
+    elif G.name == 'cyclic_translations':
         Y = torch.fft.fft(X, dim=0)
         i = torch.arange(d).view(-1, 1)
         j = torch.arange(d).view(1, -1)
         Z = Y[i] * Y[j] * torch.conj(Y[(i - j) % d])
         pX = torch.vstack((Z.reshape(d * d, -1).real, Z.reshape(d * d, -1).imag))
+
+    else:
+        print("Error: unrecognized group")
+        pX = None
 
     return norms * pX

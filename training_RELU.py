@@ -7,7 +7,7 @@ X_test_np = np.load('X_test.npy')
 X_test = torch.from_numpy(X_test_np).float().to(device)
 # number of templates in max filter
 d,n = X_test.shape
-t = 3*d
+t = 8
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
@@ -16,11 +16,11 @@ k = G.order
 X_test_orbits = G.get_orbits(X_test)
 X_test_orbits_reshaped = (X_test_orbits.permute(1, 0, 2).reshape(d, k*X_test_orbits.shape[2]))  # (d, k*n)
 
-batch_size = 20 # Number of randomly generated samples per minibatch
+batch_size = 256 # Number of randomly generated samples per minibatch
 n_trials = 10 #The number of times we will train a new model from scratch
-n_epochs = 100 #The number of training epochs for each model
+n_epochs = 50 #The number of training epochs for each model
 grad_steps_per_epoch = 200 #The number of gradient descent iterations in each training epoch
-lr = 1e-2 # learning rate (default is 1e-3 for ADAM)
+lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
 block_size = 1000 # how many data points to include in each test distance matrix
 ######################################################## TRAINING
@@ -49,7 +49,7 @@ for trial in range(n_trials):
 
             # Sample training batch
             X = torch.normal(0, 1, (d, batch_size), device=device)
-            D = G.dist_matrix(X)            # shape: (n, n), squared distances
+            D = G.dist_matrix(X)            # shape: (n, n), distances
             # create k*n by k*n distance matrix for spun up data-set
             D_expanded = D.repeat(k,k)
             X_orbits = G.get_orbits(X)      # shape: (k, d, n)
@@ -61,51 +61,50 @@ for trial in range(n_trials):
             hidden = F.relu(W @ X_orbits_reshaped)        # (hidden_dim, k*n)
             features = L @ hidden                         # (target_dim, k*n)
 
-            DfX = torch.cdist(features.T, features.T)**2
-            alpha_sq, beta_sq = squared_lipschitz(D_expanded, DfX)
-            loss = beta_sq / alpha_sq
+            DfX = torch.cdist(features.T, features.T)
+            alpha, beta = lipschitz(D_expanded, DfX)
+            loss = beta / alpha
 
             loss.backward()
+            torch.nn.utils.clip_grad_norm_([W, L], max_norm=1.0)
             optimizer.step()
 
         # Evaluation
         print(f"Epoch {epoch}", end='\r')
         with torch.no_grad():
-            # only record test statistic on the final epoch
-            if epoch == n_epochs-1:
-                # Train features
-                hidden_train = F.relu(W @ X_orbits_reshaped)
-                train_features = L @ hidden_train
-                DfX_train = torch.cdist(train_features.T, train_features.T)**2
-                alpha_train_sq, beta_train_sq = squared_lipschitz(D_expanded, DfX_train)
-                distortion_train = (beta_train_sq / alpha_train_sq).item()
+            # Train features
+            hidden_train = F.relu(W @ X_orbits_reshaped)
+            train_features = L @ hidden_train
+            DfX_train = torch.cdist(train_features.T, train_features.T)
+            alpha_train, beta_train = lipschitz(D_expanded, DfX_train)
+            distortion_train = (beta_train / alpha_train).item()
 
-                # Compute test distortion ---
-                # initalize alpha and beta
-                alpha_test_sq = torch.tensor(float("inf"), device=device)
-                beta_test_sq  = torch.tensor(0, device=device)
-                # break test set into blocks over which to compute distance matrices
-                for i in range(0, n*k, block_size):
-                    # choose subset of x_i and f(x_i)
-                    Xi = X_test_orbits_reshaped[:, i:i+block_size]
-                    fXi = L @ F.relu(W @ Xi)
+            # Compute test distortion ---
+            # initalize alpha and beta
+            alpha_test = torch.tensor(float("inf"), device=device)
+            beta_test  = torch.tensor(0, device=device)
+            # break test set into blocks over which to compute distance matrices
+            for i in range(0, n*k, block_size):
+                # choose subset of x_i and f(x_i)
+                Xi = X_test_orbits_reshaped[:, i:i+block_size]
+                fXi = L @ F.relu(W @ Xi)
 
-                    for j in range(i, n*k, block_size):
-                        Xj = X_test_orbits_reshaped[:, j:j+block_size]
-                        fXj = L @ F.relu(W @ Xj)
-                        # compute block distance matrices
-                        # when Xi=Xj function automatically only computes n choose 2 distances
-                        DX_ij   = G.dist_matrix(Xi, Xj)
-                        DfX_ij  = torch.cdist(fXi.T, fXj.T)**2
-                        # compute constants over that block
-                        alpha_ij, beta_ij = squared_lipschitz(DX_ij, DfX_ij)
-                        # update either lipschitz constant if a worse one is found
-                        alpha_test_sq = torch.minimum(alpha_test_sq, alpha_ij)
-                        beta_test_sq = torch.maximum(beta_test_sq, beta_ij)
-                distortion_test = (beta_test_sq / alpha_test_sq).item()
+                for j in range(i, n*k, block_size):
+                    Xj = X_test_orbits_reshaped[:, j:j+block_size]
+                    fXj = L @ F.relu(W @ Xj)
+                    # compute block distance matrices
+                    # when Xi=Xj function automatically only computes n choose 2 distances
+                    DX_ij   = G.dist_matrix(Xi, Xj)
+                    DfX_ij  = torch.cdist(fXi.T, fXj.T)
+                    # compute constants over that block
+                    alpha_ij, beta_ij = lipschitz(DX_ij, DfX_ij)
+                    # update either lipschitz constant if a worse one is found
+                    alpha_test = torch.minimum(alpha_test, alpha_ij)
+                    beta_test = torch.maximum(beta_test, beta_ij)
+            distortion_test = (beta_test / alpha_test).item()
 
-                train_distortions.append(distortion_train)
-                test_distortions.append(distortion_test)
+            train_distortions.append(distortion_train)
+            test_distortions.append(distortion_test)
 
         scheduler.step()
 
@@ -119,6 +118,7 @@ median_final_error = np.median([d[-1] for d in all_test_distortions])
 median_final_train_error = np.median([d[-1] for d in all_trained_distortions])
 
 fig = plt.figure(figsize = (15,5))
+plt.ylim(top=20)
 for distortion_function in all_test_distortions:
     plt.plot(distortion_function, alpha=0.3, c='red')
 for distortion_function in all_trained_distortions:
@@ -131,20 +131,19 @@ textstr = '\n'.join([
     f'Batch size: {batch_size}',
     f'Grad steps/epoch: {grad_steps_per_epoch}',
     f'Learning rate: {lr}',
-    f'Mean Final Squared Distortion: {mean_final_error:.2f}',
-    f'Median Final Squared Distortion: {median_final_error:.2f}',
-    f'Median Final Training Squared Distortion: {median_final_train_error:.2f}'
+    f'Mean Final Distortion: {mean_final_error:.2f}',
+    f'Median Final Distortion: {median_final_error:.2f}',
+    f'Median Final Training Distortion: {median_final_train_error:.2f}'
 ])
 # Place text box in upper right in axes coords
 props = dict(boxstyle='round', alpha=0.1)
 plt.gca().text(0.98, 0.98, textstr, transform=plt.gca().transAxes, fontsize=10,
                verticalalignment='top', horizontalalignment='right', bbox=props)
 
-
 plt.title("Trained Linear(RELU(Linear(X))) Model Test Error")
 plt.xlabel("Epoch")
-plt.ylabel("Squared Distortion")
-plt.yscale('log')
+plt.ylabel("Distortion")
+# plt.yscale('log')
 
 # Get current time formatted as YYYY-MM-DD_HH-MM
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
