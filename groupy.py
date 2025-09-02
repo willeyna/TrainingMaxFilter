@@ -584,8 +584,8 @@ def shape_max_filter(templates, X):
     returns:   (t, n) where entry (k,j) = max_shift |<template_k, T_a x_j>|
                taken also over x_j.conj() as the second term.
     """
-    FT = torch.fft.fft(templates, dim=0)          # (d, t)
-    FTc = torch.fft.fft(templates.conj(), dim=0)  # (d, t)
+    FT = torch.fft.fft(templates, dim=1)          # (t, d)
+    FTc = torch.fft.fft(templates.conj(), dim=1)  # (t, d)
     RX = torch.flip(X, dims=(0,))
     FRX = torch.fft.fft(RX, dim=0)            # (d, n)
 
@@ -607,7 +607,7 @@ def shape_dist_matrix(X):
     """
     n = X.shape[1]
     # squared norms of each column
-    norms = (X.conj() * X).sum(dim=0)  # shape: (n,)
+    norms = (X.conj() * X).sum(dim=0).real  # shape: (n,)
     # pairwise inner products via shape_max_filter (real by defn)
     K = shape_max_filter(X.T, X)  # shape: (n, n)
     # squared distance formula
