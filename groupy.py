@@ -576,3 +576,40 @@ def invariant_polynomial(X, G, homo=False):
         pX = None
 
     return norms * pX
+
+def shape_max_filter(templates, X):
+    """
+    templates: (t, d)
+    X:         (d, n)
+    returns:   (t, n) where entry (k,j) = max_shift |<template_k, T_a x_j>|
+               taken also over x_j.conj() as the second term.
+    """
+    FT = torch.fft.fft(templates, dim=0)          # (d, t)
+    FTc = torch.fft.fft(templates.conj(), dim=0)  # (d, t)
+    RX = torch.flip(X, dims=(0,))
+    FRX = torch.fft.fft(RX, dim=0)            # (d, n)
+
+    C1 = torch.einsum('td,dn->dtn', FTc, FRX)
+    C2 = torch.einsum('td,dn->dtn', FT, FRX)
+
+    V1 = torch.fft.ifft(C1, dim=0).abs().max(dim=0).values
+    V2 = torch.fft.ifft(C2, dim=0).abs().max(dim=0).values
+
+    return torch.maximum(V1, V2).real
+
+
+def shape_dist_matrix(X):
+    """
+    Compute pairwise squared distances for columns of X
+    using shape_max_filter as inner product.
+    X: tensor of shape (d, n)
+    returns: distance matrix D of shape (n, n)
+    """
+    n = X.shape[1]
+    # squared norms of each column
+    norms = (X.conj() * X).sum(dim=0)  # shape: (n,)
+    # pairwise inner products via shape_max_filter (real by defn)
+    K = shape_max_filter(X.T, X)  # shape: (n, n)
+    # squared distance formula
+    D = norms.view(1, n) + norms.view(n, 1) - 2 * K
+    return D
