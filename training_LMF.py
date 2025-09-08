@@ -1,28 +1,51 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-torch.manual_seed(2)
-torch.cuda.manual_seed_all(2)
-######################################################## PARAMETERS
-# load test data so that it is the same for every model
-X_test_np = np.load('X_test.npy')
-X_test = torch.from_numpy(X_test_np).float().to(device)
-# number of templates in max filter
-d,n = X_test.shape
-t = 8
+
+######################################################## MODEL PARAMETERS
+
+t = 128
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
-G = GPU_GroupAction(pmId, d, device=device)
-k = G.order
-X_test_orbits = G.get_orbits(X_test)
-
-batch_size = 256 # Number of randomly generated samples per minibatch
-n_trials = 10 # The number of times we will train a new model from scratch
-n_epochs = 50 # The number of training epochs for each model
+batch_size = 128 # Number of randomly generated samples per minibatch
+n_trials = 1 # The number of times we will train a new model from scratch
+n_epochs = 500 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
-lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
+lr = 1e-2 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
 block_size = 1000 # how many data points to include in each test distance matrix
+
+######################################################## LOADING DATA
+# load test data so that it is the same for every model
+X_test_np = np.load('district_outlines.npy')
+X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
+# number of templates in max filter
+d,n = X_test.shape
+
+# Load in training data if not generating Gaussian samples ##
+# train data is also test data here
+train_dataset = torch.utils.data.TensorDataset(X_test.T)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+######################################################## GROUP ACTION
+# G is either a finite GroupAction obj or a continuous group name str
+# G = GPU_GroupAction(pmId, d, device=device)
+G = 'shape'
+
+finite = isinstance(G, GroupAction)
+if finite:
+    k = G.order
+    X_test_orbits = G.get_orbits(X_test)
+else:
+    X_test_orbits = X_test
+    # overwrite max_filter function with the specific continuous versions
+    if G == 'shape':
+        max_filter = shape_max_filter
+    if G == 'phase':
+        max_filter = phase_max_filter
+    if G == 'Od':
+        max_filter = orthogonal_max_filter
+
 ######################################################## TRAINING
 
 all_test_distortions = []
@@ -45,14 +68,24 @@ for trial in range(n_trials):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, lr_period)
 
     for epoch in range(n_epochs):
-        for step in range(grad_steps_per_epoch):
+        # if using training data
+        for batch in train_loader:
+        # if sampling gaussian
+        # for step in range(grad_steps_per_epoch):
             optimizer.zero_grad()
 
-            # Sample training batch
-            X =  torch.normal(0, 1, (d, batch_size), device=device)
-            # full distance matrix for minibatch-- important to keep mini!
-            D = G.dist_matrix(X)           # Tensor (n, n)
-            X_orbits = G.get_orbits(X)     # Tensor (k, d, n)
+            # if sampling gaussian
+            # X =  torch.normal(0, 1, (d, batch_size), device=device)
+            # if using training data
+            X = batch[0].T
+
+            if finite:
+                # full distance matrix for minibatch-- important to keep 'mini'!
+                D = G.dist_matrix(X)           # Tensor (n, n)
+                X_orbits = G.get_orbits(X)     # Tensor (k, d, n)
+            else:
+                D = mf_dist_matrix(max_filter, X)
+                X_orbits = X
 
             # Forward pass
             norm_templates = F.normalize(templates, dim=1)
@@ -70,7 +103,7 @@ for trial in range(n_trials):
         # Test each epoch
         print(f"Epoch {epoch}", end='\r')
         with torch.no_grad():
-            # Compute training distortion on last batch of training data (X, D, etc.)
+            # Compute training distortion on last batch of training data
             norm_templates = F.normalize(templates, dim=1)
             train_features = max_filter(norm_templates, X_orbits)
             train_features = L @ train_features
@@ -78,21 +111,24 @@ for trial in range(n_trials):
             alpha_train, beta_train = lipschitz(D, DfX_train)
             distortion_train = (beta_train / alpha_train).item()
 
-            # Compute test distortion ---
-            # initalize alpha and beta
+            # Compute test distortion
             alpha_test = torch.tensor(float("inf"), device=device)
             beta_test  = torch.tensor(0, device=device)
             # break test set into blocks over which to compute distance matrices
             for i in range(0, n, block_size):
                 # choose subset of x_i and f(x_i)
                 Xi = X_test[:, i:i+block_size]
-                fXi = L @ max_filter(norm_templates, X_test_orbits[:, :, i:i+block_size])
+                fXi = L @ max_filter(norm_templates, (X_test_orbits.T[i:i+block_size]).T)
                 for j in range(i, n, block_size):
                     Xj = X_test[:, j:j+block_size]
-                    fXj = L @ max_filter(norm_templates, X_test_orbits[:, :, j:j+block_size])
+                    fXj = L @ max_filter(norm_templates, (X_test_orbits.T[j:j+block_size]).T)
                     # compute block distance matrices
                     # when Xi=Xj function automatically only computes n choose 2 distances
-                    DX_ij   = G.dist_matrix(Xi, Xj)
+                    if finite:
+                        DX_ij   = G.dist_matrix(Xi, Xj)
+                    else:
+                        DX_ij   = mf_dist_matrix(max_filter, Xi, Xj)
+
                     DfX_ij  = torch.cdist(fXi.T, fXj.T)
                     # compute constants over that block
                     alpha_ij, beta_ij = lipschitz(DX_ij, DfX_ij)
@@ -116,7 +152,7 @@ median_final_error = np.median([d[-1] for d in all_test_distortions])
 median_final_train_error = np.median([d[-1] for d in all_trained_distortions])
 
 fig = plt.figure(figsize = (15,5))
-plt.ylim(top=20)
+# plt.ylim(top=5, bottom=2)
 for distortion_function in all_test_distortions:
     plt.plot(distortion_function, alpha=0.3, c='red')
 for distortion_function in all_trained_distortions:
@@ -147,3 +183,5 @@ plt.ylabel("Distortion")
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
 # time-based label for now since all params are shown in the figure
 plt.savefig(f'./Results/LMF_{timestamp}.png')
+np.save('./L_trained.npy', all_trained_Ls[-1])
+np.save('./templates_trained.npy', all_trained_templates[-1])
