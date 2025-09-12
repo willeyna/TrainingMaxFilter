@@ -4,6 +4,9 @@ from sklearn.cluster import KMeans
 import cvxpy as cp
 from itertools import product
 from itertools import permutations
+# unsure if this is good practice but it gets the job done
+import inspect
+
 # needed only for network training scripts
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -534,17 +537,16 @@ def lipschitz(DX, DfX):
     for a mapping fX given the original distance matrix and the map's.
     """
     # TOL to add to expansions so that distortion does not blow up
-    EPS = 1e-6
+    EPS = 1e-8
     # ignore same-orbit points when not inherently G-invariant
-    mask = (DX > EPS)
-    expansions = (DfX[mask])/(DX[mask])
+    mask = (DX != 0)
+    expansions = (DfX[mask]+EPS)/(DX[mask]+EPS)
     # 4) Return min and max
     alpha = torch.min(expansions)
     beta  = torch.max(expansions)
     return alpha, beta
 
 def invariant_polynomial(X, G, homo=False):
-    X = X.double()
     device = X.device
     d,n = X.shape
     if homo:
@@ -575,38 +577,6 @@ def invariant_polynomial(X, G, homo=False):
 
     return norms * pX
 
-def mf_dist_matrix(max_filter, X, Y=None):
-    """
-    Computexx squared distances for columns of X
-    using max_filter as the inner product kernel.
-    X: (d, n)
-    Y: (d, m) or None
-    Returns: distance matrix D of shape (n, m)
-    """
-    if Y is None:
-        Kxx = max_filter(X.T, X)
-        X_norm = torch.diagonal(Kxx).real  # (n,)
-        D = X_norm[:, None] + X_norm[None, :] - 2 * Kxx
-    else:
-        # pairwise "inner product" (Gram matrix);
-        #   compute norms with MF for stability
-        Kxx = max_filter(X.T, X)  # (n, n)
-        Kyy = max_filter(Y.T, Y)  # (m, m)
-        Kxy = max_filter(X.T, Y)  # (n, m)
-
-        # norms are just diagonal entries of Gram matrices
-        X_norm = torch.diagonal(Kxx).real  # (n,)
-        Y_norm = torch.diagonal(Kyy).real  # (m,)
-
-        # distance formula (still ‖x‖² + ‖y‖² − 2⟨x,y⟩, but safer)
-        D = X_norm[:, None] + Y_norm[None, :] - 2 * Kxy
-
-    # numerical cleanup
-    D = torch.sqrt(torch.clamp(D, min=0.0))
-
-    return D
-
-
 def shape_max_filter(templates, X):
     """
     templates: (t, d)
@@ -628,107 +598,18 @@ def shape_max_filter(templates, X):
     return torch.maximum(V1, V2).real
 
 
-def phase_max_filter(templates, X):
+def shape_dist_matrix(X):
     """
-    templates: (t, d)
-    X:         (d, n)
-    returns:   (t, n) where entry (k,j) =  |<template_k, x_j>|
+    Compute pairwise squared distances for columns of X
+    using shape_max_filter as inner product.
+    X: tensor of shape (d, n)
+    returns: distance matrix D of shape (n, n)
     """
-    return torch.abs(templates.conj() @ X)
-
-def batched_eigvalsh(G, chunk=1024):
-    """
-    Compute eigvalsh on G in smaller chunks to avoid cuSOLVER limits.
-    G: (t, n, m, m)
-    Returns eigs: (t, n, m)
-    """
-    t, n, m, _ = G.shape
-    eigs_out = torch.empty((t, n, m), device=G.device, dtype=G.dtype)
-    for i in range(0, n, chunk):
-        eigs_out[:, i:i+chunk] = torch.linalg.eigvalsh(G[:, i:i+chunk].contiguous())
-    return eigs_out
-
-def orthogonal_max_filter(templates, X):
-    """
-    templates: (t, p, d)
-    X:         (d, p, n)
-    returns:   (t, n) where entry (k,j) =  |<template_k, x_j>|
-    """
-    K = torch.einsum('bpn,bqn->pqn', X, X)                           # (p,p,n)
-    G = torch.einsum('tpa,tqc,pqn->tnac', templates, templates, K)   # (t,n,d,d)
-    # G[t,n] is a GRAM MATRIX and so computing sv is same as sqrt eig (faster)
-    eigs = batched_eigvalsh(G)
-    # just for stability
-    eigs = torch.clip(eigs, 0)
-    norms = torch.sqrt(eigs).sum(dim=-1)
-    return norms
-
-# ChatGPT + Gemini coded
-def gen_orbit_reps(X, k, group):
-    """
-    Generates k orbit representatives for each input data point in X under a specified group action.
-
-    Args:
-        X (torch.Tensor): The input data. For 'shape' and 'phase', shape is (d, n).
-                          For 'Od', shape is (d, p, n).
-        k (int): The number of orbit representatives to generate per data point.
-        group (str): The group action to apply ('shape', 'phase', or 'Od').
-
-    Returns:
-        torch.Tensor: The generated orbit representatives.
-    """
-    if group == 'shape':
-        d, n = X.shape
-        # Create k random circular shifts for each of the n columns
-        shifts = torch.randint(0, d, size=(n, k), device=X.device)
-        row_idx = (torch.arange(d, device=X.device).view(d, 1, 1) + shifts.unsqueeze(0)) % d
-        col_idx = torch.arange(n, device=X.device).view(1, n, 1).expand(d, n, k)
-        X_shifted = X[row_idx, col_idx]
-
-        # Create k random phases and conjugations for each of the n columns
-        angles = torch.rand(n, k, device=X.device) * 2.0 * np.pi
-        phases = torch.exp(1j * angles.to(X.dtype))
-        conj_flags = torch.randint(0, 2, size=(n, k), device=X.device, dtype=torch.bool)
-
-        # Apply phases and conjugations via broadcasting
-        Y_intermediate = X_shifted.to(X.dtype) * phases.unsqueeze(0)
-        Y_intermediate = torch.where(conj_flags.unsqueeze(0), Y_intermediate.conj(), Y_intermediate)
-
-        # Transpose and reshape to interleave the k representatives, resulting in shape (d, n*k)
-        Y = Y_intermediate.transpose(1, 2).reshape(d, n * k)
-        return Y
-
-    elif group == 'phase':
-        d, n = X.shape
-        # Create k random phases for each of the n columns
-        angles = torch.rand(n, k, device=X.device) * 2.0 * np.pi
-        phases = torch.exp(1j * angles.to(X.dtype))
-
-        # Use einsum for a direct broadcast, multiplication, and transpose.
-        # 'dn,nk->dkn' multiplies each column d with its corresponding k phases.
-        Y_permuted = torch.einsum('dn,nk->dkn', X.to(X.dtype), phases)
-        Y = Y_permuted.reshape(d, n * k)
-        return Y
-
-    elif group == 'Od':
-        d, p, n = X.shape
-        B = n * k
-
-        # Generate B random orthogonal matrices from O(d)
-        mats = torch.randn(B, d, d, device=X.device, dtype=X.dtype)
-        Qs, Rs = torch.linalg.qr(mats)
-        diag_sign = torch.sign(torch.diagonal(Rs, dim1=-2, dim2=-1))
-        diag_sign.masked_fill_(diag_sign == 0, 1.0)
-        Qs = Qs * diag_sign.unsqueeze(1)
-
-        # Prepare X for batched multiplication by creating k copies of each of the n samples
-        # (d,p,n) -> (n,d,p) -> expand to (k,n,d,p) -> reshape to (B,d,p)
-        X_rep = X.permute(2, 0, 1).unsqueeze(0).expand(k, -1, -1, -1).reshape(B, d, p)
-
-        # Apply the B random orthogonal matrices to the B prepared input samples
-        Y_b = Qs @ X_rep
-
-        # Reshape the output back, preserving the ordering of representatives
-        # (B,d,p) -> (k,n,d,p) -> (d,p,k,n) -> (d,p,B)
-        Y = Y_b.view(k, n, d, p).permute(2, 3, 0, 1).reshape(d, p, B)
-        return Y
+    n = X.shape[1]
+    # squared norms of each column
+    norms = (X.conj() * X).sum(dim=0).real  # shape: (n,)
+    # pairwise inner products via shape_max_filter (real by defn)
+    K = shape_max_filter(X.T, X)  # shape: (n, n)
+    # squared distance formula
+    D = norms.view(1, n) + norms.view(n, 1) - 2 * K
+    return D
