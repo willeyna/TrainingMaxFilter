@@ -3,23 +3,26 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ######################################################## MODEL PARAMETERS
 # number of templates in max filter
-t = 16
+t = 50
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
 batch_size = 128 # Number of randomly generated samples per minibatch
-n_trials = 1 # The number of times we will train a new model from scratch
-n_epochs = 10 # The number of training epochs for each model
+n_trials = 5 # The number of times we will train a new model from scratch
+n_epochs = 100 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
-
+use_double = False
 ######################################################## LOADING DATA
 X_test_np = np.load('X_test.npy')
 if np.iscomplexobj(X_test_np):
     X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
 else:
-    X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
+    if use_double:
+        X_test = torch.from_numpy(X_test_np).to(torch.float64).to(device)
+    else:
+        X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
 input_shape = X_test.shape[:-1]
 n = X_test.shape[-1]
 input_dtype = X_test.dtype
@@ -32,8 +35,8 @@ input_dtype = X_test.dtype
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
 # G = GPU_GroupAction(pmId, input_shape[0], device=device)
-G = GPU_GroupAction(rotations, input_shape[0], device=device, orders=[3])
-# G = 'phase'
+# G = GPU_GroupAction(rotations, input_shape[0], device=device, dtype=X_test.dtype, orders=[4])
+G = 'phase'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -65,7 +68,7 @@ for trial in range(n_trials):
     # max filter template layer
     templates = torch.randn((t, *(input_shape[::-1])), dtype=X_test.dtype, device=device, requires_grad=True)
     # linear layer
-    L = torch.normal(0, 1, (target_dim, t), requires_grad=True, device=device)
+    L = torch.normal(0, 1, (target_dim, t), requires_grad=True, device=device, dtype=X_test.real.dtype)
 
     optimizer = torch.optim.Adam([templates, L], lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, lr_period)
@@ -176,5 +179,5 @@ plt.ylabel("Distortion")
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
 # time-based label for now since all params are shown in the figure
 plt.savefig(f'./Results/LMF_{timestamp}.png')
-np.save('./L_trained.npy', all_trained_Ls[-1])
-np.save('./templates_trained.npy', all_trained_templates[-1])
+np.save('./L_trained_districts.npy', all_trained_Ls[-1])
+np.save('./templates_trained_districts.npy', all_trained_templates[-1])

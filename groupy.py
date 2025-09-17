@@ -321,13 +321,13 @@ class GPU_GroupAction(GroupAction):
     '''
     A subclass of GroupAction that uses PyTorch for efficient GPU-based computations.
     '''
-    def __init__(self, group, dim, device, *args, **kwargs):
+    def __init__(self, group, dim, device, dtype, *args, **kwargs):
         super(GPU_GroupAction, self).__init__(group, dim, *args, **kwargs)
         # device to run tensor computations on
         self.device = device or torch.device('cpu')  # fallback if not provided
 
         # Convert the group matrices to torch tensors for GPU compatibility
-        self.matrices = torch.stack([torch.tensor(mat, device=self.device) for mat in self.group(dim, *self.args,**self.kwargs)], dim=0)
+        self.matrices = torch.stack([torch.tensor(mat, device=self.device, dtype=dtype) for mat in self.group(dim, *self.args,**self.kwargs)], dim=0)
 
     def dist_matrix(self, X, Y=None):
         """
@@ -361,14 +361,6 @@ class GPU_GroupAction(GroupAction):
                 sq_dists = (diff ** 2).sum(dim=1)  # (k, n - i)
                 D[:, i] = sq_dists.min(dim=0).values
         return torch.sqrt(D)
-
-    def get_orbits(self, X):
-        '''
-        Takes in dxn dataset in R^n and returns a new |G|xdxn consisting of the
-            orbit of each point under the ith elements group action as [i, :, :]
-        '''
-        # matrices are stored in double precision, so this ensures numerical stability
-        return (self.matrices@X.double()).float()
 
 # ─── Group matrix constructors ────────────────────────────────────────────────
 # functions that generate list of all matrices in a finite group
@@ -407,16 +399,18 @@ def rotations(d, orders):
     rotations on the 2x2 subspaces
     '''
     m = d // 2
-    R = np.eye(d)
-    for i, n in enumerate(orders[:m]):
-        if n > 1:
-            theta = 2 * np.pi / n
-            R[2*i:2*i+2, 2*i:2*i+2] = [
-                [np.cos(theta), -np.sin(theta)],
-                [np.sin(theta),  np.cos(theta)],
-            ]
+    thetas = [(2*np.pi/n) if n > 1 else None for n in orders[:m]]
     max_power = np.lcm.reduce([n for n in orders[:m] if n > 1], initial=1)
-    return [np.linalg.matrix_power(R, k) for k in range(max_power)]
+    mats = []
+    for k in range(max_power):
+        R = np.eye(d)
+        for i, t in enumerate(thetas):
+            if t is None:
+                continue
+            c = np.cos(k * t); s = np.sin(k * t)
+            R[2*i:2*i+2, 2*i:2*i+2] = [[c, -s], [s, c]]
+        mats.append(R)
+    return mats
 
 def diagonal_sign(d):
     """
@@ -718,7 +712,7 @@ def gen_orbit_reps(X, k, group):
         Y = Y_permuted.reshape(d, n * k)
         return Y
 
-    elif group == 'Od':
+    elif group == 'orthogonal':
         d, p, n = X.shape
         B = n * k
 

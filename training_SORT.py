@@ -1,25 +1,29 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+use_double = True
 ######################################################## PARAMETERS
 # load test data so that it is the same for every model
 X_test_np = np.load('X_test.npy')
 if np.iscomplexobj(X_test_np):
     X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
 else:
-    X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
+    if use_double:
+        X_test = torch.from_numpy(X_test_np).to(torch.float64).to(device)
+    else:
+        X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
 d,n = X_test.shape
 
-G = GPU_GroupAction(rotations, d, device=device, orders=[3])
+G = GPU_GroupAction(rotations, d, device=device, dtype=X_test.dtype, orders=[4])
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 
 # number of templates in filter
-t = (3*d)//k + 1
+t = (3*d)//k + (1 if (3*d) % k != 0 else 0)
 
 batch_size = 128 # Number of randomly generated samples per minibatch
-n_trials = 1 # The number of times we will train a new model from scratch
-n_epochs = 10 # The number of training epochs for each model
+n_trials = 10 # The number of times we will train a new model from scratch
+n_epochs = 50 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
@@ -37,7 +41,7 @@ for trial in range(n_trials):
     train_distortions = []
 
     # sort filter template layer
-    templates = torch.normal(0, 1, (t, d), requires_grad=True, device=device)
+    templates = torch.normal(0, 1, (t, d), requires_grad=True, device=device, dtype=X_test.dtype)
 
     optimizer = torch.optim.Adam([templates], lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, lr_period)
@@ -47,7 +51,7 @@ for trial in range(n_trials):
             optimizer.zero_grad()
 
             # Sample training batch
-            X =  torch.normal(0, 1, (d, batch_size), device=device)
+            X = torch.randn((d, batch_size), dtype=X_test.dtype, device=device)
             # full distance matrix for minibatch-- important to keep mini!
             D = G.dist_matrix(X)           # Tensor (n, n)
             X_orbits = G.get_orbits(X)     # Tensor (k, d, n)
@@ -104,7 +108,7 @@ for distortion_function in all_trained_distortions:
     plt.plot(distortion_function, alpha=0.1, c='blue')
 
 textstr = '\n'.join([
-    str(G).split(',')[0],
+    str(G),
     f'Input Data Dimension: {d}',
     f'Embedding Dimension: {t*k}',
     f'Batch size: {batch_size}',

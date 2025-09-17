@@ -3,23 +3,27 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ######################################################## PARAMETERS
 X_test_np = np.load('X_test.npy')
+use_double = False
 if np.iscomplexobj(X_test_np):
     X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
 else:
-    X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
+    if use_double:
+        X_test = torch.from_numpy(X_test_np).to(torch.float64).to(device)
+    else:
+        X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
 input_shape = X_test.shape[:-1]
 n = X_test.shape[-1]
 input_dtype = X_test.dtype
 
-t = 8
+t = 50
 
 block_size = 2000 # how many data points to include in each test distance matrix
-n_trials = 100
+n_trials = 1000
 
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
-G = GPU_GroupAction(rotations, input_shape[0], device=device, orders=[3])
-# G = 'phase'
+# G = GPU_GroupAction(rotations, input_shape[0], device=device, dtype=X_test.dtype, orders=[4])
+G = 'phase'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -93,7 +97,7 @@ distortions = np.array(all_test_distortions).flatten()
 plt.hist(distortions[np.isfinite(distortions)])
 
 textstr = '\n'.join([
-    str(G).split(',')[0],
+    str(G),
     f'Input Data Dimension: {str(input_shape)}',
     f'Embedding Dimension: {t}',
     f'Mean Distortion: {mean_final_error:.2f}',
