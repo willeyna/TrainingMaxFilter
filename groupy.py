@@ -327,7 +327,7 @@ class GPU_GroupAction(GroupAction):
         self.device = device or torch.device('cpu')  # fallback if not provided
 
         # Convert the group matrices to torch tensors for GPU compatibility
-        self.matrices = torch.stack([torch.tensor(mat, dtype=torch.float32, device=self.device) for mat in self.group(dim, *self.args,**self.kwargs)], dim=0)
+        self.matrices = torch.stack([torch.tensor(mat, device=self.device) for mat in self.group(dim, *self.args,**self.kwargs)], dim=0)
 
     def dist_matrix(self, X, Y=None):
         """
@@ -361,6 +361,14 @@ class GPU_GroupAction(GroupAction):
                 sq_dists = (diff ** 2).sum(dim=1)  # (k, n - i)
                 D[:, i] = sq_dists.min(dim=0).values
         return torch.sqrt(D)
+
+    def get_orbits(self, X):
+        '''
+        Takes in dxn dataset in R^n and returns a new |G|xdxn consisting of the
+            orbit of each point under the ith elements group action as [i, :, :]
+        '''
+        # matrices are stored in double precision, so this ensures numerical stability
+        return (self.matrices@X.double()).float()
 
 # ─── Group matrix constructors ────────────────────────────────────────────────
 # functions that generate list of all matrices in a finite group
