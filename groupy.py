@@ -548,34 +548,56 @@ def lipschitz(DX, DfX):
 def invariant_polynomial(X, G, homo=False):
     X = X.double()
     device = X.device
-    d,n = X.shape
+
+    if X.dim() == 2:
+        d, n = X.shape
+    if X.dim() == 3:
+        d, p, n = X.shape
+
     if homo:
-        norms = torch.linalg.vector_norm(X, dim=0)
+        if X.dim() == 3:  # (d,p,n) -> norm per n over d*p
+            norms = torch.linalg.vector_norm(X.reshape(d * X.shape[1], X.shape[2]), dim=0)
+        else:
+            norms = torch.linalg.vector_norm(X, dim=0)
         Y = X/norms
     else:
         norms = torch.ones(n, device = device)
         Y = X
 
-    if G.name == 'pmId':
-        # Compute outer products: each x_i x_i^T stored in a tensor of shape (n, d, d)
-        outer_products = torch.einsum('in,jn->ijn', Y, Y)  # Shape: (n, d, d)
-        pX = outer_products.reshape(d*d, n)
+    if isinstance(G, str):
+        if G == 'phase':
+            # Compute outer products: each x_i x_i^T stored in a tensor of shape (n, d, d)
+            outer_products = torch.einsum('in,jn->ijn', Y, Y.conj())  # Shape: (n, d, d)
+            pX = outer_products.reshape(d*d, n)
+            return norms * pX
 
-    elif G.name == 'symmetric':
-        pX = torch.stack([torch.sum(X**k, axis=0) for k in range(1, d+1)])
+        elif G == 'orthogonal':
+            inner_products = torch.einsum('dpn,dqn->pqn', Y, Y.conj())  # (p,p,n)
+            pX = inner_products.reshape(p*p, n)
+            return norms * pX
 
-    elif G.name == 'cyclic_translations':
-        Y = torch.fft.fft(X, dim=0)
-        i = torch.arange(d).view(-1, 1)
-        j = torch.arange(d).view(1, -1)
-        Z = Y[i] * Y[j] * torch.conj(Y[(i - j) % d])
-        pX = torch.vstack((Z.reshape(d * d, -1).real, Z.reshape(d * d, -1).imag))
+    elif isinstance(G, GroupAction):
+        if G.name == 'pmId':
+            # Compute outer products: each x_i x_i^T stored in a tensor of shape (n, d, d)
+            outer_products = torch.einsum('in,jn->ijn', Y, Y)  # Shape: (n, d, d)
+            pX = outer_products.reshape(d*d, n)
+            return norms * pX
+
+        elif G.name == 'symmetric':
+            pX = torch.stack([torch.sum(X**k, axis=0) for k in range(1, d+1)])
+            return norms * pX
+
+        elif G.name == 'cyclic_translations':
+            Y = torch.fft.fft(X, dim=0)
+            i = torch.arange(d).view(-1, 1)
+            j = torch.arange(d).view(1, -1)
+            Z = Y[i] * Y[j] * torch.conj(Y[(i - j) % d])
+            pX = torch.vstack((Z.reshape(d * d, -1).real, Z.reshape(d * d, -1).imag))
+            return norms * pX
 
     else:
         print("Error: unrecognized group")
-        pX = None
-
-    return norms * pX
+        return
 
 def mf_dist_matrix(max_filter, X, Y=None):
     """
