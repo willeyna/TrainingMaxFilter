@@ -4,10 +4,14 @@ device = torch.device('cpu')
 ######################################################## PARAMETERS
 # load test data so that it is the same for every model
 X_test_np = np.load('X_test.npy')
-X_test = torch.from_numpy(X_test_np).to(torch.float64).to(device)
+if np.iscomplexobj(X_test_np):
+    X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
+else:
+    X_test = torch.from_numpy(X_test_np).to(torch.float64).to(device)
 
-# G = GPU_GroupAction(pmId, d, device=device)
-G = 'orthogonal'
+# G = GPU_GroupAction(cyclic_translations, 50, device=device, dtype=X_test.dtype)
+G = 'phase'
+
 finite = isinstance(G, GroupAction)
 if finite:
     k = G.order
@@ -32,7 +36,7 @@ with torch.no_grad():
     else:
         D = mf_dist_matrix(max_filter, X_test)
 
-    DfX  = torch.cdist(fX.T, fX.T)
+    DfX = torch.linalg.norm(fX[:, :, None] - fX[:, None, :], dim=0)
     # compute constants over that block
     alpha_test, beta_test = lipschitz(D, DfX)
     distortion_test = ((beta_test / alpha_test).item())
@@ -41,13 +45,7 @@ with torch.no_grad():
 
     fX = invariant_polynomial(X_test, G, homo=True)
 
-    if finite:
-        # full distance matrix for minibatch-- important to keep 'mini'!
-        D = G.dist_matrix(X_test)           # Tensor (n, n)
-    else:
-        D = mf_dist_matrix(max_filter, X_test)
-
-    DfX  = torch.cdist(fX.T, fX.T)
+    DfX = torch.linalg.norm(fX[:, :, None] - fX[:, None, :], dim=0)
     # compute constants over that block
     alpha_test, beta_test = lipschitz(D, DfX)
     distortion_test = ((beta_test / alpha_test).item())
