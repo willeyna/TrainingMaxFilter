@@ -15,15 +15,15 @@ input_shape = X_test.shape[:-1]
 n = X_test.shape[-1]
 input_dtype = X_test.dtype
 
-t = 50
+t = 8
 
 block_size = 2000 # how many data points to include in each test distance matrix
-n_trials = 1000
+n_trials = 2000
 
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
 # G = GPU_GroupAction(rotations, input_shape[0], device=device, dtype=X_test.dtype, orders=[4])
-G = 'phase'
+G = 'orthogonal_2x2'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -38,6 +38,8 @@ else:
         max_filter = phase_max_filter
     if G == 'orthogonal':
         max_filter = orthogonal_max_filter
+    if G == 'orthogonal_2x2':
+        max_filter = orthogonal_max_filter_2x2
 
 ######################################################## TESTING
 

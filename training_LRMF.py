@@ -1,14 +1,15 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cpu')
 
 ######################################################## MODEL PARAMETERS
 # number of templates in max filter
-t = 50
+t = 8
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
 batch_size = 128 # Number of randomly generated samples per minibatch
-n_trials = 5 # The number of times we will train a new model from scratch
+n_trials = 1 # The number of times we will train a new model from scratch
 n_epochs = 100 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
@@ -35,7 +36,7 @@ input_dtype = X_test.dtype
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
 # G = GPU_GroupAction(rotations, input_shape[0], device=device, dtype=X_test.dtype, orders=[4])
-G = 'phase'
+G = 'orthogonal_2x2'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -50,6 +51,8 @@ else:
         max_filter = phase_max_filter
     if G == 'orthogonal':
         max_filter = orthogonal_max_filter
+    if G == 'orthogonal_2x2':
+        max_filter = orthogonal_max_filter_2x2
 
 ######################################################## TRAINING
 

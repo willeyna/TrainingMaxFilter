@@ -546,7 +546,6 @@ def lipschitz(DX, DfX):
     return alpha, beta
 
 def invariant_polynomial(X, G, homo=False):
-    X = X.double()
     device = X.device
 
     if X.dim() == 2:
@@ -593,6 +592,13 @@ def invariant_polynomial(X, G, homo=False):
             j = torch.arange(d).view(1, -1)
             Z = Y[i] * Y[j] * torch.conj(Y[(i - j) % d])
             pX = torch.vstack((Z.reshape(d * d, -1).real, Z.reshape(d * d, -1).imag))
+            return norms * pX
+
+        elif G.name == 'rotations':
+            r = G.kwargs['orders'][0]
+            complex_Y = Y[0,:] + 1j*Y[1,:]
+            inv = complex_Y**r
+            pX = np.vstack([np.real(inv), np.imag(inv)])
             return norms * pX
 
     else:
@@ -676,7 +682,7 @@ def orthogonal_max_filter(templates, X):
     """
     templates: (t, p, d)
     X:         (d, p, n)
-    returns:   (t, n) where entry (k,j) =  |<template_k, x_j>|
+    returns:   (t, n) where entry (k,j) =  ||<template_k x_j>||_*
     """
     K = torch.einsum('bpn,bqn->pqn', X, X)                           # (p,p,n)
     G = torch.einsum('tpa,tqc,pqn->tnac', templates, templates, K)   # (t,n,d,d)
@@ -686,6 +692,19 @@ def orthogonal_max_filter(templates, X):
     eigs = torch.clip(eigs, 0)
     norms = torch.sqrt(eigs).sum(dim=-1)
     return norms
+
+def orthogonal_max_filter_2x2(templates, X):
+    """
+    templates: (t, 2, 2)
+    X:         (2, 2, n)
+    returns:   (t, n) where entry (k,j) =  ||<template_k x_j>||_*
+    """
+    # TX^T in each t,n
+    V = torch.einsum('bpn,tpa->tnba', X, templates)            # (t,n,2,2)
+    fro2 = (V * V).sum(dim=(-2, -1))                           # ||V||_F^2
+    det  = V[:,:,0,0]*V[:,:,1,1] - V[:,:,0,1]*V[:,:,1,0]       # det(V)
+    # clamp for stability
+    return torch.sqrt(torch.clamp(fro2 + 2*torch.abs(det), min=0.0))
 
 # ChatGPT + Gemini coded
 def gen_orbit_reps(X, k, group):
@@ -734,7 +753,7 @@ def gen_orbit_reps(X, k, group):
         Y = Y_permuted.reshape(d, n * k)
         return Y
 
-    elif group == 'orthogonal':
+    elif group == 'orthogonal' or 'orthogonal_2x2':
         d, p, n = X.shape
         B = n * k
 

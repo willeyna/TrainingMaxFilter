@@ -1,9 +1,9 @@
 from groupy import *
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 ######################################################## MODEL PARAMETERS
 # number of templates in max filter
-t = 50
+t = 8
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
@@ -13,7 +13,7 @@ n_epochs = 100 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
-use_double = False
+use_double = True
 ######################################################## LOADING DATA
 X_test_np = np.load('X_test.npy')
 if np.iscomplexobj(X_test_np):
@@ -35,7 +35,7 @@ input_dtype = X_test.dtype
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
 # G = GPU_GroupAction(rotations, input_shape[0], device=device, dtype=X_test.dtype, orders=[4])
-G = 'phase'
+G = 'orthogonal_2x2'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -51,6 +51,8 @@ else:
         max_filter = phase_max_filter
     if G == 'orthogonal':
         max_filter = orthogonal_max_filter
+    if G == 'orthogonal_2x2':
+        max_filter = orthogonal_max_filter_2x2
 
     # how many orbit representatives to sample for each data point
     k = 10
@@ -101,7 +103,7 @@ for trial in range(n_trials):
 
             # Forward pass
             # Train features
-            if G == 'orthogonal':
+            if G == 'orthogonal' or 'orthogonal_2x2':
                 hidden = F.relu(torch.einsum('npd,dqb->nb', W, X_orbits_reshaped))
             else:
                 hidden = F.relu(torch.real(W @ X_orbits_reshaped))
@@ -126,7 +128,7 @@ for trial in range(n_trials):
             D_test_expanded = D_test.repeat(k,k)
 
             # Train features
-            if G == 'orthogonal':
+            if G == 'orthogonal' or 'orthogonal_2x2':
                 hidden_train = F.relu(torch.einsum('npd,dqb->nb', W, X_orbits_reshaped))
             else:
                 hidden_train = F.relu(torch.real(W @ X_orbits_reshaped))
@@ -144,14 +146,14 @@ for trial in range(n_trials):
             for i in range(k):
                 # choose subset of x_i and f(x_i)
                 Xi = (X_test_orbits_reshaped.T[i*n:(i+1)*n]).T
-                if G == 'orthogonal':
+                if G == 'orthogonal' or 'orthogonal_2x2':
                     fXi = L @ F.relu(torch.einsum('npd,dqb->nb', W, Xi))
                 else:
                     fXi = L @ F.relu(torch.real(W @ Xi))
 
                 for j in range(k):
                     Xj = (X_test_orbits_reshaped.T[j*n:(j+1)*n]).T
-                    if G == 'orthogonal':
+                    if G == 'orthogonal' or 'orthogonal_2x2':
                         fXj = L @ F.relu(torch.einsum('npd,dqb->nb', W, Xj))
                     else:
                         fXj = L @ F.relu(torch.real(W @ Xj))
