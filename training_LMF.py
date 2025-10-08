@@ -3,13 +3,13 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ######################################################## MODEL PARAMETERS
 # number of templates in max filter
-t = 8
+t = 12
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
 batch_size = 128 # Number of randomly generated samples per minibatch
-n_trials = 1 # The number of times we will train a new model from scratch
-n_epochs = 10 # The number of training epochs for each model
+n_trials = 10 # The number of times we will train a new model from scratch
+n_epochs = 50 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
@@ -34,9 +34,9 @@ input_dtype = X_test.dtype
 
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
-# G = GPU_GroupAction(pmId, input_shape[0], device=device, dtype=X_test.dtype)
+# G = GPU_GroupAction(cyclic_translations, input_shape[0], device=device, dtype=X_test.dtype)
 # G = GPU_GroupAction(rotations, input_shape[0], device=device, dtype=X_test.dtype, orders=[4])
-G = 'orthogonal_2x2'
+G = 'phase'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -181,5 +181,5 @@ plt.ylabel("Distortion")
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
 # time-based label for now since all params are shown in the figure
 plt.savefig(f'./Results/LMF_{timestamp}.png')
-np.save('./L_trained_128.npy', all_trained_Ls[-1])
-np.save('./templates_trained_128.npy', all_trained_templates[-1])
+# np.save('./L_trained_districts.npy', all_trained_Ls[-1])
+# np.save('./templates_trained_districts.npy', all_trained_templates[-1])

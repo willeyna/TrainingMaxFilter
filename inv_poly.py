@@ -9,7 +9,7 @@ if np.iscomplexobj(X_test_np):
 else:
     X_test = torch.from_numpy(X_test_np).to(torch.float64).to(device)
 
-# G = GPU_GroupAction(cyclic_translations, 50, device=device, dtype=X_test.dtype)
+# G = GPU_GroupAction(cyclic_translations, 5, device=device, dtype=X_test.dtype)
 G = 'phase'
 
 finite = isinstance(G, GroupAction)

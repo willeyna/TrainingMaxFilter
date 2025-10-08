@@ -1,7 +1,7 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-use_double = True
+use_double = False
 ######################################################## PARAMETERS
 # load test data so that it is the same for every model
 X_test_np = np.load('X_test.npy')
@@ -14,12 +14,15 @@ else:
         X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
 d,n = X_test.shape
 
-G = GPU_GroupAction(rotations, d, device=device, dtype=X_test.dtype, orders=[4])
+G = GPU_GroupAction(cyclic_translations, d, device=device, dtype=X_test.dtype)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 
 # number of templates in filter
 t = (3*d)//k + (1 if (3*d) % k != 0 else 0)
+# t = 128//k
+
+target_dim = t*k
 
 batch_size = 128 # Number of randomly generated samples per minibatch
 n_trials = 10 # The number of times we will train a new model from scratch
@@ -96,9 +99,13 @@ for trial in range(n_trials):
     all_test_distortions.append(test_distortions)
     all_trained_templates.append(norm_templates.detach().cpu().numpy())
 
-mean_final_error = np.mean([d[-1] for d in all_test_distortions])
-median_final_error = np.median([d[-1] for d in all_test_distortions])
 median_final_train_error = np.median([d[-1] for d in all_trained_distortions])
+
+final_distortions = [d[-1] for d in all_test_distortions]
+
+mean_final_error = np.mean(final_distortions)
+median_final_error = np.median(final_distortions)
+min_final_error = np.min(final_distortions)
 
 fig = plt.figure(figsize = (15,5))
 
@@ -110,12 +117,13 @@ for distortion_function in all_trained_distortions:
 textstr = '\n'.join([
     str(G),
     f'Input Data Dimension: {d}',
-    f'Embedding Dimension: {t*k}',
+    f'Embedding Dimension: {target_dim}',
     f'Batch size: {batch_size}',
     f'Grad steps/epoch: {grad_steps_per_epoch}',
     f'Learning rate: {lr}',
     f'Mean Final Distortion: {mean_final_error:.2f}',
     f'Median Final Distortion: {median_final_error:.2f}',
+    f'Best Final Distortion: {min_final_error:.2f}',
     f'Median Final Training Distortion: {median_final_train_error:.2f}'
 ])
 # Place text box in upper right in axes coords

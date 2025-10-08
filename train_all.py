@@ -24,9 +24,9 @@ def free_vram_mb():
     ])
     return int(out.split()[0])
 
-# # ~~~~~~~~~ COMMENT HERE TO NOT REGENERATE DATA ~~~~~~~~~~~~
-# subprocess.run(["python", SCRIPTS[0]], check=True)
-# print("---Data generation complete---")
+# ~~~~~~~~~ COMMENT HERE TO NOT REGENERATE DATA ~~~~~~~~~~~~
+subprocess.run(["python", SCRIPTS[0]], check=True)
+print("---Data generation complete---")
 
 # 2) launch remaining scripts (fall back to CPU when GPU memory is low)
 procs = []
