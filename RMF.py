@@ -1,8 +1,8 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+# device = torch.device('cpu')
 ######################################################## PARAMETERS
-X_test_np = np.load('district_outlines.npy')
+X_test_np = np.load("X_test.npy")
 use_double = False
 if np.iscomplexobj(X_test_np):
     X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
@@ -15,15 +15,15 @@ input_shape = X_test.shape[:-1]
 n = X_test.shape[-1]
 input_dtype = X_test.dtype
 
-t = 12
+t = 18
 
-block_size = 2000 # how many data points to include in each test distance matrix
+block_size = 250 # how many data points to include in each test distance matrix
 n_trials = 2000
 
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
-# G = GPU_GroupAction(cyclic_translations, input_shape[0], device=device, dtype=X_test.dtype)
-G = 'phase'
+# G = GPU_GroupAction(pmId, input_shape[0], device=device, dtype=X_test.dtype)
+G = 'orthogonal'
 
 finite = isinstance(G, GroupAction)
 if finite:

@@ -4,19 +4,19 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ######################################################## MODEL PARAMETERS
 # number of templates in max filter
-t = 12
+t = 18
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
 batch_size = 128 # Number of randomly generated samples per minibatch
 n_trials = 10 # The number of times we will train a new model from scratch
-n_epochs = 50 # The number of training epochs for each model
+n_epochs = 100 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
 use_double = False
 ######################################################## LOADING DATA
-X_test_np = np.load('X_test.npy')
+X_test_np = np.load("X_test.npy")
 if np.iscomplexobj(X_test_np):
     X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
 else:
@@ -35,8 +35,8 @@ input_dtype = X_test.dtype
 
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
-# G = GPU_GroupAction(cyclic_translations, input_shape[0], device=device, dtype=X_test.dtype)
-G = 'phase'
+# G = GPU_GroupAction(pmId, input_shape[0], device=device, dtype=X_test.dtype)
+G = 'orthogonal'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -109,30 +109,32 @@ for trial in range(n_trials):
 
         # Test each epoch
         print(f"Epoch {epoch}", end='\r')
-        with torch.no_grad():
-            # Compute training distortion on last batch of training data
-            norm_templates = F.normalize(templates, dim=tuple(range(1, templates.dim())))
-            train_features = max_filter(norm_templates, X_orbits)
-            train_features = L @ train_features
-            DfX_train = torch.cdist(train_features.T, train_features.T)
-            alpha_train, beta_train = lipschitz(D, DfX_train)
-            distortion_train = (beta_train / alpha_train).item()
+        if epoch == (n_epochs-1):
+            max_filter = orthogonal_max_filter_batched
+            with torch.no_grad():
+                # Compute training distortion on last batch of training data
+                norm_templates = F.normalize(templates, dim=tuple(range(1, templates.dim())))
+                train_features = max_filter(norm_templates, X_orbits)
+                train_features = L @ train_features
+                DfX_train = torch.cdist(train_features.T, train_features.T)
+                alpha_train, beta_train = lipschitz(D, DfX_train)
+                distortion_train = (beta_train / alpha_train).item()
 
-            fX_test = L @ max_filter(norm_templates, X_test_orbits)
-            if finite:
-                D_test   = G.dist_matrix(X_test)
-            else:
-                D_test   = mf_dist_matrix(max_filter, X_test_orbits)
+                fX_test = L @ max_filter(norm_templates, X_test_orbits)
+                if finite:
+                    D_test   = G.dist_matrix(X_test)
+                else:
+                    D_test   = mf_dist_matrix(max_filter, X_test_orbits)
 
-            DfX_test = torch.cdist(fX_test.T, fX_test.T)
-            # Compute test distortion
-            alpha_test, beta_test = lipschitz(D_test, DfX_test)
+                DfX_test = torch.cdist(fX_test.T, fX_test.T)
+                # Compute test distortion
+                alpha_test, beta_test = lipschitz(D_test, DfX_test)
 
-            distortion_test = (beta_test / alpha_test).item()
+                distortion_test = (beta_test / alpha_test).item()
 
-            train_distortions.append(distortion_train)
-            test_distortions.append(distortion_test)
-        scheduler.step()
+                train_distortions.append(distortion_train)
+                test_distortions.append(distortion_test)
+            scheduler.step()
 
     all_trained_distortions.append(train_distortions)
     all_test_distortions.append(test_distortions)

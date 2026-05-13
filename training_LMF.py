@@ -1,21 +1,21 @@
 from groupy import *
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+# device = torch.device('cpu')
 ######################################################## MODEL PARAMETERS
 # number of templates in max filter
-t = 12
+t = 18
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
 batch_size = 128 # Number of randomly generated samples per minibatch
 n_trials = 10 # The number of times we will train a new model from scratch
-n_epochs = 50 # The number of training epochs for each model
+n_epochs = 100 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
 use_double = False
 ######################################################## LOADING DATA
-X_test_np = np.load('X_test.npy')
+X_test_np = np.load("X_test.npy")
 if np.iscomplexobj(X_test_np):
     X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
 else:
@@ -34,9 +34,8 @@ input_dtype = X_test.dtype
 
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
-# G = GPU_GroupAction(cyclic_translations, input_shape[0], device=device, dtype=X_test.dtype)
-# G = GPU_GroupAction(rotations, input_shape[0], device=device, dtype=X_test.dtype, orders=[4])
-G = 'phase'
+# G = GPU_GroupAction(pmId, input_shape[0], device=device, dtype=X_test.dtype)
+G = 'orthogonal'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -69,6 +68,8 @@ for trial in range(n_trials):
 
     # max filter template layer
     templates = torch.randn((t, *(input_shape[::-1])), dtype=X_test.dtype, device=device, requires_grad=True)
+    # optimal Z2 templates in R^2 (roots of unity)
+    # templates = torch.from_numpy(np.vstack([[np.cos(np.pi*k/t), np.sin(np.pi*k/t)] for k in range(t)])).to(device)
     # linear layer
     L = torch.normal(0, 1, (target_dim, t), requires_grad=True, device=device, dtype=X_test.real.dtype)
 
@@ -110,30 +111,40 @@ for trial in range(n_trials):
 
         # Test each epoch
         print(f"Epoch {epoch}", end='\r')
-        with torch.no_grad():
-            # Compute training distortion on last batch of training data
-            norm_templates = F.normalize(templates, dim=tuple(range(1, templates.dim())))
-            train_features = max_filter(norm_templates, X_orbits)
-            train_features = L @ train_features
-            DfX_train = torch.cdist(train_features.T, train_features.T)
-            alpha_train, beta_train = lipschitz(D, DfX_train)
-            distortion_train = (beta_train / alpha_train).item()
+        if epoch == (n_epochs-1):
+            max_filter = orthogonal_max_filter_batched
+            with torch.no_grad():
+                # Compute training distortion on last batch of training data
+                norm_templates = F.normalize(templates, dim=tuple(range(1, templates.dim())))
+                train_features = max_filter(norm_templates, X_orbits)
+                train_features = L @ train_features
+                DfX_train = torch.cdist(train_features.T, train_features.T)
+                alpha_train, beta_train = lipschitz(D, DfX_train)
+                distortion_train = (beta_train / alpha_train).item()
 
-            fX_test = L @ max_filter(norm_templates, X_test_orbits)
-            if finite:
-                D_test   = G.dist_matrix(X_test)
-            else:
-                D_test   = mf_dist_matrix(max_filter, X_test_orbits)
+                fX_test = L @ max_filter(norm_templates, X_test_orbits)
 
-            DfX_test = torch.cdist(fX_test.T, fX_test.T)
-            # Compute test distortion
-            alpha_test, beta_test = lipschitz(D_test, DfX_test)
 
-            distortion_test = (beta_test / alpha_test).item()
+                # grab all pairs one off
+                # DfX_test = torch.norm(fX_test[:, :-1]- fX_test[:, 1:], dim=0)
+                # selfMF = torch.flatten(torch.stack([max_filter(X_test[:,:,i].unsqueeze(-1).T, X_test[:,:,i].unsqueeze(-1)) for i in range(n)]).to(dtype=torch.float64, device=device))
+                # crossMF= torch.flatten(torch.stack([max_filter(X_test[:,:,i].unsqueeze(-1).T, X_test[:,:,i+1].unsqueeze(-1)) for i in range(n-1)]).to(dtype=torch.float64, device=device))
+                # D_test = torch.sqrt(torch.clamp(selfMF[1:] + selfMF[:-1] - 2*crossMF, min=0.0))
 
-            train_distortions.append(distortion_train)
-            test_distortions.append(distortion_test)
-        scheduler.step()
+                if finite:
+                    D_test   = G.dist_matrix(X_test)
+                else:
+                    D_test   = mf_dist_matrix(max_filter, X_test_orbits)
+
+                DfX_test = torch.cdist(fX_test.T, fX_test.T)
+                # Compute test distortion
+                alpha_test, beta_test = lipschitz(D_test, DfX_test)
+
+                distortion_test = (beta_test / alpha_test).item()
+
+                train_distortions.append(distortion_train)
+                test_distortions.append(distortion_test)
+            scheduler.step()
 
     all_trained_distortions.append(train_distortions)
     all_test_distortions.append(test_distortions)
@@ -181,5 +192,5 @@ plt.ylabel("Distortion")
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
 # time-based label for now since all params are shown in the figure
 plt.savefig(f'./Results/LMF_{timestamp}.png')
-# np.save('./L_trained_districts.npy', all_trained_Ls[-1])
-# np.save('./templates_trained_districts.npy', all_trained_templates[-1])
+# np.save('./L_trained_shapes.npy', all_trained_Ls[-1])
+# np.save('./templates_trained_shapes.npy', all_trained_templates[-1])

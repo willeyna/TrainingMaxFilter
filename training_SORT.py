@@ -14,7 +14,7 @@ else:
         X_test = torch.from_numpy(X_test_np).to(torch.float).to(device)
 d,n = X_test.shape
 
-G = GPU_GroupAction(cyclic_translations, d, device=device, dtype=X_test.dtype)
+G = GPU_GroupAction(pmId, d, device=device, dtype=X_test.dtype)
 k = G.order
 X_test_orbits = G.get_orbits(X_test)
 

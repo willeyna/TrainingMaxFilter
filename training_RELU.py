@@ -1,21 +1,21 @@
 from groupy import *
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# device = torch.device('cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 ######################################################## MODEL PARAMETERS
 # number of templates in max filter
-t = 12
+t = 18
 # currently maintain dimensionality given by max filtering
 target_dim = t
 
 batch_size = 128 # Number of randomly generated samples per minibatch
 n_trials = 10 # The number of times we will train a new model from scratch
-n_epochs = 50 # The number of training epochs for each model
+n_epochs = 100 # The number of training epochs for each model
 grad_steps_per_epoch = 200 # The number of gradient descent iterations in each training epoch
 lr = 5e-3 # learning rate (default is 1e-3 for ADAM)
 lr_period = n_epochs # period for cosine annealing
-use_double = False
+use_double = True
 ######################################################## LOADING DATA
-X_test_np = np.load('X_test.npy')
+X_test_np = np.load("X_test.npy")
 if np.iscomplexobj(X_test_np):
     X_test = torch.from_numpy(X_test_np).to(torch.complex64).to(device)
 else:
@@ -29,13 +29,13 @@ input_dtype = X_test.dtype
 
 # Load in training data if not generating Gaussian samples ##
 # train data is also test data here
-# train_dataset = torch.utils.data.TensorDataset(X_test.T)
-# train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+train_dataset = torch.utils.data.TensorDataset(X_test.T)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 ######################################################## GROUP ACTION
 # G is either a finite GroupAction obj or a continuous group name str
-# G = GPU_GroupAction(cyclic_translations, input_shape[0], device=device, dtype=X_test.dtype)
-G = 'phase'
+# G = GPU_GroupAction(pmId, input_shape[0], device=device, dtype=X_test.dtype)
+G = 'orthogonal'
 
 finite = isinstance(G, GroupAction)
 if finite:
@@ -80,15 +80,15 @@ for trial in range(n_trials):
 
     for epoch in range(n_epochs):
         # if using training data
-        # for batch in train_loader:
+        for batch in train_loader:
         # if sampling gaussian
-        for step in range(grad_steps_per_epoch):
+        # for step in range(grad_steps_per_epoch):
             optimizer.zero_grad()
 
             # if sampling gaussian
-            X = torch.randn((*input_shape, batch_size), dtype=input_dtype, device=device)
+            # X = torch.randn((*input_shape, batch_size), dtype=input_dtype, device=device)
             # if using training data
-            # X = batch[0].T
+            X = batch[0].T
 
             if finite:
                 # full distance matrix for minibatch-- important to keep 'mini'!
@@ -120,54 +120,56 @@ for trial in range(n_trials):
 
         # Evaluation
         print(f"Epoch {epoch}", end='\r')
-        with torch.no_grad():
-            if finite:
-                D_test   = G.dist_matrix(X_test, X_test)
-            else:
-                D_test   = mf_dist_matrix(max_filter, X_test, X_test)
-            D_test_expanded = D_test.repeat(k,k)
-
-            # Train features
-            if G == 'orthogonal' or G == 'orthogonal_2x2':
-                hidden_train = F.relu(torch.einsum('npd,dqb->nb', W, X_orbits_reshaped))
-            else:
-                hidden_train = F.relu(torch.real(W @ X_orbits_reshaped))
-
-            train_features = L @ hidden_train
-            DfX_train = torch.cdist(train_features.T, train_features.T)
-            alpha_train, beta_train = lipschitz(D_expanded, DfX_train)
-            distortion_train = (beta_train / alpha_train).item()
-
-            # Compute test distortion ---
-            # initalize alpha and beta
-            alpha_test = torch.tensor(float("inf"), device=device)
-            beta_test  = torch.tensor(0, device=device)
-            # break test set into blocks of size n_test over which to compute distance matrices
-            for i in range(k):
-                # choose subset of x_i and f(x_i)
-                Xi = (X_test_orbits_reshaped.T[i*n:(i+1)*n]).T
-                if G == 'orthogonal' or G == 'orthogonal_2x2':
-                    fXi = L @ F.relu(torch.einsum('npd,dqb->nb', W, Xi))
+        if epoch == n_epochs-1:
+            with torch.no_grad():
+                if finite:
+                    D_test   = G.dist_matrix(X_test, X_test)
                 else:
-                    fXi = L @ F.relu(torch.real(W @ Xi))
+                    D_test   = mf_dist_matrix(max_filter, X_test, X_test)
+                D_test_expanded = D_test.repeat(k,k)
 
-                for j in range(k):
-                    Xj = (X_test_orbits_reshaped.T[j*n:(j+1)*n]).T
+                # Train features
+                if G == 'orthogonal' or G == 'orthogonal_2x2':
+                    hidden_train = F.relu(torch.einsum('npd,dqb->nb', W, X_orbits_reshaped))
+                else:
+                    hidden_train = F.relu(torch.real(W @ X_orbits_reshaped))
+
+                train_features = L @ hidden_train
+                DfX_train = torch.cdist(train_features.T, train_features.T)
+                alpha_train, beta_train = lipschitz(D_expanded, DfX_train)
+                distortion_train = (beta_train / alpha_train).item()
+
+                # Compute test distortion ---
+                # initalize alpha and beta
+                alpha_test = torch.tensor(float("inf"), device=device)
+                beta_test  = torch.tensor(0, device=device)
+                # break test set into blocks of size n_test over which to compute distance matrices
+                for i in range(k):
+                    # choose subset of x_i and f(x_i)
+                    Xi = (X_test_orbits_reshaped.T[i*n:(i+1)*n]).T
                     if G == 'orthogonal' or G == 'orthogonal_2x2':
-                        fXj = L @ F.relu(torch.einsum('npd,dqb->nb', W, Xj))
+                        fXi = L @ F.relu(torch.einsum('npd,dqb->nb', W, Xi))
                     else:
-                        fXj = L @ F.relu(torch.real(W @ Xj))
+                        fXi = L @ F.relu(torch.real(W @ Xi))
 
-                    DfX_ij  = torch.cdist(fXi.T, fXj.T)
-                    # compute constants over that block
-                    alpha_ij, beta_ij = lipschitz(D_test_expanded[i*n:(i+1)*n, j*n:(j+1)*n], DfX_ij)
-                    # update either lipschitz constant if a worse one is found
-                    alpha_test = torch.minimum(alpha_test, alpha_ij)
-                    beta_test = torch.maximum(beta_test, beta_ij)
-            distortion_test = (beta_test / alpha_test).item()
+                    for j in range(k):
+                        Xj = (X_test_orbits_reshaped.T[j*n:(j+1)*n]).T
+                        if G == 'orthogonal' or G == 'orthogonal_2x2':
+                            fXj = L @ F.relu(torch.einsum('npd,dqb->nb', W, Xj))
+                        else:
+                            fXj = L @ F.relu(torch.real(W @ Xj))
 
-            train_distortions.append(distortion_train)
-            test_distortions.append(distortion_test)
+                        DfX_ij  = torch.cdist(fXi.T, fXj.T)
+                        # compute constants over that block
+                        alpha_ij, beta_ij = lipschitz(D_test_expanded[i*n:(i+1)*n, j*n:(j+1)*n], DfX_ij)
+                        # update either lipschitz constant if a worse one is found
+                        alpha_test = torch.minimum(alpha_test, alpha_ij)
+                        beta_test = torch.maximum(beta_test, beta_ij)
+                        del DfX_ij
+                distortion_test = (beta_test / alpha_test).item()
+
+                train_distortions.append(distortion_train)
+                test_distortions.append(distortion_test)
 
         scheduler.step()
 

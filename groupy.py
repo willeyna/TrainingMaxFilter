@@ -583,14 +583,14 @@ def invariant_polynomial(X, G, homo=False):
             return norms * pX
 
         elif G.name == 'symmetric':
-            pX = torch.stack([torch.sum(X**k, axis=0) for k in range(1, d+1)])
+            pX = torch.stack([torch.sum(Y**k, axis=0) for k in range(1, d+1)])
             return norms * pX
 
         elif G.name == 'cyclic_translations':
-            Y = torch.fft.fft(X, dim=0)
+            F = torch.fft.fft(Y, dim=0)
             i = torch.arange(d).view(-1, 1)
             j = torch.arange(d).view(1, -1)
-            Z = Y[i] * Y[j] * torch.conj(Y[(i - j) % d])
+            Z = F[i] * F[j] * torch.conj(F[(i - j) % d])
             pX = torch.vstack((Z.reshape(d * d, -1).real, Z.reshape(d * d, -1).imag))
             return norms * pX
 
@@ -598,7 +598,7 @@ def invariant_polynomial(X, G, homo=False):
             r = G.kwargs['orders'][0]
             complex_Y = Y[0,:] + 1j*Y[1,:]
             inv = complex_Y**r
-            pX = np.vstack([np.real(inv), np.imag(inv)])
+            pX = torch.stack([torch.real(inv), torch.imag(inv)], dim=0)
             return norms * pX
 
     else:
@@ -628,7 +628,6 @@ def mf_dist_matrix(max_filter, X, Y=None):
         X_norm = torch.diagonal(Kxx).real  # (n,)
         Y_norm = torch.diagonal(Kyy).real  # (m,)
 
-        # distance formula (still ‖x‖² + ‖y‖² − 2⟨x,y⟩, but safer)
         D = X_norm[:, None] + Y_norm[None, :] - 2 * Kxy
 
     # numerical cleanup
@@ -775,3 +774,24 @@ def gen_orbit_reps(X, k, group):
         # (B,d,p) -> (k,n,d,p) -> (d,p,k,n) -> (d,p,B)
         Y = Y_b.view(k, n, d, p).permute(2, 3, 0, 1).reshape(d, p, B)
         return Y
+
+
+# ### CHATGPT coded testing blockwise max filter for orthgonal ON TEST SET (large tensor o/w)
+
+def orthogonal_max_filter_batched(templates, X, batch_size=128):
+    t, p, d = templates.shape
+    _, _, n = X.shape
+    out = []
+
+    for i0 in range(0, n, batch_size):
+        i1 = min(n, i0 + batch_size)
+        X_block = X[:, :, i0:i1]   # (d,p,batch)
+        K = torch.einsum('bpn,bqn->pqn', X_block, X_block)        # (p,p,batch)
+        G = torch.einsum('tpa,tqc,pqn->tnac', templates, templates, K)  # (t,batch,d,d)
+        eigs = batched_eigvalsh(G)  # only batch_size at a time
+        norms = torch.sqrt(torch.clamp(eigs,0)).sum(dim=-1)  # (t,batch)
+        out.append(norms)
+        del X_block, K, G, eigs
+        torch.cuda.empty_cache()
+
+    return torch.cat(out, dim=1)  # (t, n)
